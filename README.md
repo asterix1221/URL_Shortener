@@ -1,7 +1,6 @@
 # URL Shortener с аналитикой
 
-<!-- после push на GitHub замени OWNER на свой логин: бейдж начнёт показывать статус прогона -->
-[![autotests](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml/badge.svg)](https://github.com/OWNER/URL_Shortener/actions/workflows/autotests.yml)
+[![autotests](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml)
 
 Сервис сокращения ссылок на Spring Boot: редирект, JWT-аутентификация, статистика кликов,
 лимиты и TTL ссылок, кэш Redis, асинхронная запись кликов в Kafka, Prometheus/Grafana,
