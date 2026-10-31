@@ -1,0 +1,11 @@
+target/
+.idea/
+.vscode/
+*.iml
+.env
+infra/.env
+*.jfr
+shortener-loadtests/target/
+shortener-loadtests/src/test/resources/codes.csv
+shortener-loadtests/src/test/resources/stats.csv
+.DS_Store
