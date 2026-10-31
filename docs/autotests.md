@@ -90,6 +90,33 @@ Postgres и приложение (`shortener-service/Dockerfile`). Порт хо
   возвращает `null`, а `body("content.code", …)` работает.
 - `io.qameta.allure:allure-junit5` в 2.35.x переименован в `allure-jupiter` — подключён новый artifact.
 
+## CI (GitHub Actions)
+
+`.github/workflows/autotests.yml`: push в `main` и pull request. Шаги — чистый
+`infra/.env` из примера, `docker compose up -d --build`, ожидание `/actuator/health`,
+`./mvnw -B -q verify` в сервисе, `./mvnw -B test` автотестов против контейнера,
+`allure:report` и загрузка доклада артефактом.
+
+| Прогон | Коммит | Итог |
+|---|---|---|
+| #1 (`actions/runs/41231657968`) | `d2b9cab` | failure за 27 с: exit 1 на старте стека, exit 126 на шаге Allure, предупреждение «No files were found with the provided path: shortener-autotests/target/site/allure-maven-plugin», артефактов нет |
+| #2 (`actions/runs/41231896819`) | `04603dd` | success; артефакт `allure-report`, 1,6 МБ |
+| #3 (`actions/runs/41232694633`) | `668fd49` (уже после переписывания истории) | success; артефакт `allure-report`, 1,6 МБ |
+
+Причина падения #1 — отсутствие бита исполнения у `mvnw` в индексе (режим 100644).
+На Windows `core.fileMode=false`, поэтому `chmod +x` не фиксировался, а на ubuntu-latest
+`checkout` даёт неисполняемый файл: `./mvnw` внутри Dockerfile не запускается, сборка
+образа и `compose up -d --build` падают (exit 1), и сам шаг `./mvnw allure:report` даёт
+126. Исправлено `git update-index --chmod=+x` для обоих `mvnw` (содержимое файлов не
+менялось — blob тот же).
+
+Хеш `d2b9cab` и `04603dd` — коммиты до переписывания истории (рабочие документы были
+вынесены из репозитория); сами прогоны #1 и #2 остались в списке Actions по старым ссылкам.
+
+Бейдж статуса — в начале `README.md`. `api.github.com` с этой машины недоступен (таймаут),
+`gh` CLI не установлен, поэтому статус прогонов читался по страницам
+`github.com/<owner>/<repo>/actions/runs/<id>` и по SVG-бейджу, а не через REST API.
+
 ## Использованные версии
 
 | Библиотека | Версия | Почему не «самая свежая» |
