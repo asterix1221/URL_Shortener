@@ -102,6 +102,7 @@ Postgres и приложение (`shortener-service/Dockerfile`). Порт хо
 | #1 (`actions/runs/41231657968`) | `d2b9cab` | failure за 27 с: exit 1 на старте стека, exit 126 на шаге Allure, предупреждение «No files were found with the provided path: shortener-autotests/target/site/allure-maven-plugin», артефактов нет |
 | #2 (`actions/runs/41231896819`) | `04603dd` | success; артефакт `allure-report`, 1,6 МБ |
 | #3 (`actions/runs/41232694633`) | `668fd49` (уже после переписывания истории) | success; артефакт `allure-report`, 1,6 МБ |
+| #4 (`actions/runs/41233079126`) | `431fd22` | success; артефакт `allure-report`, 1,6 МБ — финальная проверка актуального `main` |
 
 Причина падения #1 — отсутствие бита исполнения у `mvnw` в индексе (режим 100644).
 На Windows `core.fileMode=false`, поэтому `chmod +x` не фиксировался, а на ubuntu-latest
