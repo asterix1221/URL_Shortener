@@ -10,9 +10,17 @@ spring:
 
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
+  jwt:
+    secret: ${JWT_SECRET:}
+    ttl-seconds: ${JWT_TTL_SECONDS:3600}
+  ip-salt: ${IP_SALT:change_me_ip_salt}
 
 management:
   endpoints:
     web:
       exposure:
         include: health
+
+springdoc:
+  swagger-ui:
+    persist-authorization: true

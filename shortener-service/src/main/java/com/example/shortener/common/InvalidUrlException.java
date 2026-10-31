@@ -1,6 +1,6 @@
 package com.example.shortener.common;
 
-public class InvalidUrlException extends RuntimeException {
+public class InvalidUrlException extends BadRequestException {
 
     public InvalidUrlException(String message) {
         super(message);
