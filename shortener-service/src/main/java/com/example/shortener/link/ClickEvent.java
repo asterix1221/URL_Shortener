@@ -45,4 +45,16 @@ public class ClickEvent {
     public Long getLinkId() {
         return linkId;
     }
+
+    public String getIpHash() {
+        return ipHash;
+    }
+
+    public String getUserAgent() {
+        return userAgent;
+    }
+
+    public String getReferrer() {
+        return referrer;
+    }
 }
