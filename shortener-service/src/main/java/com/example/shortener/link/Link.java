@@ -24,17 +24,38 @@ public class Link implements Persistable<Long> {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
+    @Column(name = "user_id")
+    private Long userId;
+
+    @Column(name = "expires_at")
+    private Instant expiresAt;
+
+    @Column(name = "max_clicks")
+    private Integer maxClicks;
+
+    @Column(name = "click_count", nullable = false)
+    private int clickCount;
+
+    @Column(name = "active", nullable = false)
+    private boolean active;
+
     @Transient
-    private boolean isNew = true;
+    private final boolean isNew = true;
 
     protected Link() {
     }
 
-    public Link(Long id, String code, String originalUrl, Instant createdAt) {
+    public Link(Long id, String code, String originalUrl, Instant createdAt, Long userId,
+                Instant expiresAt, Integer maxClicks) {
         this.id = id;
         this.code = code;
         this.originalUrl = originalUrl;
         this.createdAt = createdAt;
+        this.userId = userId;
+        this.expiresAt = expiresAt;
+        this.maxClicks = maxClicks;
+        this.clickCount = 0;
+        this.active = true;
     }
 
     @Override
@@ -58,5 +79,25 @@ public class Link implements Persistable<Long> {
 
     public Instant getCreatedAt() {
         return createdAt;
+    }
+
+    public Long getUserId() {
+        return userId;
+    }
+
+    public Instant getExpiresAt() {
+        return expiresAt;
+    }
+
+    public Integer getMaxClicks() {
+        return maxClicks;
+    }
+
+    public int getClickCount() {
+        return clickCount;
+    }
+
+    public boolean isActive() {
+        return active;
     }
 }
