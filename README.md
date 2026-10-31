@@ -1,5 +1,8 @@
 # URL Shortener с аналитикой
 
+<!-- после push на GitHub замени OWNER на свой логин: бейдж начнёт показывать статус прогона -->
+[![autotests](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml/badge.svg)](https://github.com/OWNER/URL_Shortener/actions/workflows/autotests.yml)
+
 Сервис сокращения ссылок на Spring Boot: редирект, JWT-аутентификация, статистика кликов,
 лимиты и TTL ссылок, кэш Redis, асинхронная запись кликов в Kafka, Prometheus/Grafana,
 API-автотесты (REST Assured + Allure) и нагрузочные сценарии (Gatling).
@@ -9,11 +12,11 @@ API-автотесты (REST Assured + Allure) и нагрузочные сце�
 Нужны Docker Desktop, Java 21+ и PowerShell 7.
 
 ```powershell
-# 1. поднять базу
+# 1. поднять стек: Postgres + приложение одним образом
 Copy-Item infra\.env.example infra\.env
-docker compose -f infra\docker-compose.yml --env-file infra\.env up -d
+docker compose -f infra\docker-compose.yml --env-file infra\.env up -d --build
 
-# 2. запустить сервис
+# 2. (опционально) запуск сервиса локально с hot reload, вместо контейнера
 $env:JWT_SECRET = "dev-secret-dev-secret-dev-secret-123456"
 cd shortener-service; .\mvnw.cmd spring-boot:run
 
@@ -26,7 +29,8 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/links -Headers @{ Autho
 
 Полный сценарий «регистрация → логин → ссылка → переходы → статистика»: `.\scripts\smoke.ps1`.
 
-Если порт 8080 на машине занят (например Jenkins), запускай сервис на другом:
+Если порт 8080 на машине занят (например Jenkins), контейнерное приложение поднимается на
+`APP_PORT` из `infra/.env` (здесь `28080`); локальный запуск — так же:
 `$env:SERVER_PORT = "28080"; $env:APP_BASE_URL = "http://localhost:28080"`, а автотесты и
 нагрузку указывай этим же адресом (`-DbaseUrl=...`, `BASE_URL`).
 

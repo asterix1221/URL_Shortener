@@ -1,0 +1,4 @@
+# mvnw выполняется внутри Linux-контейнера — переводы строк должны быть LF
+mvnw text eol=lf
+*.sh text eol=lf
+mvnw.cmd text eol=crlf
