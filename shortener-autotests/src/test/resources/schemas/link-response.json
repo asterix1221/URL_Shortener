@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LinkResponse",
+  "type": "object",
+  "required": ["code", "shortUrl", "originalUrl", "createdAt", "expiresAt", "maxClicks", "active"],
+  "properties": {
+    "code": {"type": "string", "pattern": "^[A-Za-z0-9_-]{1,32}$"},
+    "shortUrl": {"type": "string", "pattern": "^https?://.+/[A-Za-z0-9_-]{1,32}$"},
+    "originalUrl": {"type": "string", "pattern": "^https?://.+"},
+    "createdAt": {"type": "string"},
+    "expiresAt": {"type": ["string", "null"]},
+    "maxClicks": {"type": ["integer", "null"], "minimum": 1},
+    "active": {"type": "boolean"}
+  }
+}

@@ -15,5 +15,19 @@ services:
       timeout: 3s
       retries: 10
 
+  app:
+    build: ../shortener-service
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB}
+      DB_USER: ${POSTGRES_USER}
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      APP_BASE_URL: http://localhost:${APP_PORT}
+    ports:
+      - "${APP_PORT}:8080"
+
 volumes:
   pgdata:

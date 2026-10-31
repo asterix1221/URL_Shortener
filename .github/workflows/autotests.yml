@@ -1,0 +1,44 @@
+name: autotests
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  api-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Prepare env
+        run: |
+          cp infra/.env.example infra/.env
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=ci-secret-ci-secret-ci-secret-1234567|" infra/.env
+      - name: Start stack
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
+      - name: Wait for health
+        run: |
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8080/actuator/health && exit 0
+            sleep 2
+          done
+          docker compose -f infra/docker-compose.yml logs app
+          exit 1
+      - name: Service tests
+        working-directory: shortener-service
+        run: ./mvnw -B -q verify
+      - name: API tests
+        working-directory: shortener-autotests
+        run: ./mvnw -B test -DbaseUrl=http://localhost:8080
+      - name: Allure report
+        if: always()
+        working-directory: shortener-autotests
+        run: ./mvnw -B allure:report
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: allure-report
+          path: shortener-autotests/target/site/allure-maven-plugin
