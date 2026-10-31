@@ -1,5 +1,8 @@
 package com.example.shortener.link;
 
+import com.example.shortener.cache.LinkCache;
+import com.example.shortener.clicks.ClickEventMessage;
+import com.example.shortener.clicks.ClickEventPublisher;
 import com.example.shortener.common.Base62;
 import com.example.shortener.common.BadRequestException;
 import com.example.shortener.common.ConflictException;
@@ -25,6 +28,7 @@ import org.mockito.quality.Strictness;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
@@ -48,11 +52,17 @@ class LinkServiceTest {
     @Mock
     private ClickEventRepository clicks;
 
+    @Mock
+    private LinkCache cache;
+
+    @Mock
+    private ClickEventPublisher clickEvents;
+
     private LinkService service;
 
     @BeforeEach
     void createService() {
-        service = new LinkService(links, clicks, "http://localhost:8080", "test-salt");
+        service = new LinkService(links, clicks, cache, clickEvents, "http://localhost:8080", "test-salt");
     }
 
     @Test
@@ -152,33 +162,58 @@ class LinkServiceTest {
     }
 
     @Test
-    void redirectReturnsOriginalUrlAndStoresClick() {
+    void redirectReturnsOriginalUrlAndPublishesClick() {
         Link link = link("code1", USER_ID, true, null, null);
         when(links.findByCode("code1")).thenReturn(Optional.of(link));
-        when(links.increaseClickCount(link.getId())).thenReturn(1);
 
         String target = service.redirect("code1", "203.0.113.5", "JUnit", "https://referrer.example.com");
 
         assertThat(target).isEqualTo("https://example.com/target");
-        ArgumentCaptor<ClickEvent> event = ArgumentCaptor.forClass(ClickEvent.class);
-        verify(clicks).save(event.capture());
-        assertThat(event.getValue().getLinkId()).isEqualTo(link.getId());
+        ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
+        verify(clickEvents).publish(event.capture());
+        assertThat(event.getValue().linkId()).isEqualTo(link.getId());
+        // click_count для ссылки без лимита больше не пишется из потока редиректа
+        verify(links, never()).increaseClickCount(any());
+        verify(cache).put(link);
+    }
+
+    @Test
+    void cacheHitRedirectsWithoutTouchingDatabase() {
+        when(cache.find("code1")).thenReturn(new LinkCache.Cached(7_000L, "https://cached.example.com"));
+
+        String target = service.redirect("code1", "203.0.113.5", "JUnit", null);
+
+        assertThat(target).isEqualTo("https://cached.example.com");
+        verify(links, never()).findByCode(any());
+        ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
+        verify(clickEvents).publish(event.capture());
+        assertThat(event.getValue().linkId()).isEqualTo(7_000L);
+    }
+
+    @Test
+    void linkWithMaxClicksUsesAtomicGuard() {
+        Link link = link("limited", USER_ID, true, null, 5);
+        when(links.findByCode("limited")).thenReturn(Optional.of(link));
+        when(links.increaseClickCount(link.getId())).thenReturn(1);
+
+        service.redirect("limited", "203.0.113.5", "JUnit", null);
+
+        verify(links).increaseClickCount(link.getId());
     }
 
     @Test
     void storesHashedIpInsteadOfRawIp() {
         Link link = link("code1", USER_ID, true, null, null);
         when(links.findByCode("code1")).thenReturn(Optional.of(link));
-        when(links.increaseClickCount(any())).thenReturn(1);
 
         service.redirect("code1", "203.0.113.5", "JUnit-agent", "https://referrer.example.com/page");
 
-        ArgumentCaptor<ClickEvent> event = ArgumentCaptor.forClass(ClickEvent.class);
-        verify(clicks).save(event.capture());
-        assertThat(event.getValue().getIpHash()).hasSize(64).matches("[0-9a-f]{64}");
-        assertThat(event.getValue().getIpHash()).doesNotContain("203.0.113.5");
-        assertThat(event.getValue().getUserAgent()).isEqualTo("JUnit-agent");
-        assertThat(event.getValue().getReferrer()).isEqualTo("https://referrer.example.com/page");
+        ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
+        verify(clickEvents).publish(event.capture());
+        assertThat(event.getValue().ipHash()).hasSize(64).matches("[0-9a-f]{64}");
+        assertThat(event.getValue().ipHash()).doesNotContain("203.0.113.5");
+        assertThat(event.getValue().userAgent()).isEqualTo("JUnit-agent");
+        assertThat(event.getValue().referrer()).isEqualTo("https://referrer.example.com/page");
     }
 
     @Test
@@ -187,7 +222,7 @@ class LinkServiceTest {
 
         assertThatExceptionOfType(NotFoundException.class)
                 .isThrownBy(() -> service.redirect("missing", "127.0.0.1", null, null));
-        verify(clicks, never()).save(any());
+        verify(clickEvents, never()).publish(any());
     }
 
     @Test
@@ -203,7 +238,7 @@ class LinkServiceTest {
 
         assertThatExceptionOfType(GoneException.class)
                 .isThrownBy(() -> service.redirect(link.getCode(), "127.0.0.1", null, null));
-        verify(clicks, never()).save(any());
+        verify(clickEvents, never()).publish(any());
     }
 
     @Test
@@ -237,6 +272,7 @@ class LinkServiceTest {
         service.delete(USER_ID, "mine");
 
         verify(links).deactivate(link.getId());
+        verify(cache).evict("mine");
     }
 
     @Test
@@ -278,17 +314,21 @@ class LinkServiceTest {
     void blankIpProducesNullHash() {
         Link link = link("code1", USER_ID, true, null, null);
         when(links.findByCode("code1")).thenReturn(Optional.of(link));
-        when(links.increaseClickCount(any())).thenReturn(1);
 
         service.redirect("code1", "   ", "agent", null);
 
-        ArgumentCaptor<ClickEvent> event = ArgumentCaptor.forClass(ClickEvent.class);
-        verify(clicks).save(event.capture());
-        assertThat(event.getValue().getIpHash()).isNull();
+        ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
+        verify(clickEvents).publish(event.capture());
+        assertThat(event.getValue().ipHash()).isNull();
     }
 
     private Link link(String code, Long ownerId, boolean active, Instant expiresAt, Integer maxClicks) {
-        return new Link(1_000L + code.hashCode(), code, "https://example.com/target",
+        Link link = new Link(1_000L + code.hashCode(), code, "https://example.com/target",
                 Instant.now(), ownerId, expiresAt, maxClicks);
+        if (!active) {
+            // деактивация в проде делается UPDATE-запросом, конструктор всегда создаёт активную
+            ReflectionTestUtils.setField(link, "active", false);
+        }
+        return link;
     }
 }

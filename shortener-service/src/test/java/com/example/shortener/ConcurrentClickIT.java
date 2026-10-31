@@ -26,7 +26,7 @@ class ConcurrentClickIT extends AbstractIT {
         assertThat(statuses).filteredOn(status -> status == 302).hasSize(5);
         assertThat(statuses).filteredOn(status -> status == 410).hasSize(15);
         assertThat(clickCount(link.code())).isEqualTo(5);
-        assertThat(clickEvents(link.code())).isEqualTo(5);
+        awaitClickEvents(link.code(), 5);
     }
 
     private List<Integer> parallelClicks(String code, int requests) throws Exception {

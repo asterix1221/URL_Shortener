@@ -153,3 +153,78 @@ Postgres и приложение (`shortener-service/Dockerfile`). Порт хо
 Падает ровно тот набор, который отвечает за разграничение доступа: 403-кейсы для чтения чужой
 ссылки, её удаления и статистики. Остальные 35 тестов зелёные — то есть сьют не «валится целиком»
 от любой правки, а указывает на конкретное нарушенное правило.
+
+## Этап 5: кэш, асинхронные клики, rate limit
+
+Юнит + интеграционные (`cd shortener-service; .\mvnw.cmd clean verify`): **73 юнит-теста и
+19 интеграционных, BUILD SUCCESS**, покрытие по строкам JaCoCo **91,1%**.
+
+| Класс IT | Тестов | Что проверяет |
+|---|---|---|
+| `CacheIT` | 3 | второй редирект обслужен кэшем (значение, TTL, счётчик `hit`; из БД URL изменён напрямую — редирект всё равно отдаёт старый), `DELETE` вычищает оба ключа, ссылка с `maxClicks` не кэшируется |
+| `RateLimitIT` | 2 | 11-й (при лимите 2 — 3-й) `POST /api/links` → 429 с `Retry-After`, лимит per-user, а не global |
+| `LinkLifecycleIT` | 5 | TTL, `maxClicks`, удаление, отчёт по кликам |
+| `ConcurrentClickIT` | 1 | 20 параллельных кликов по ссылке с лимитом |
+| `SchemaMigrationIT` | 3 | Flyway V1–V4 |
+| `SecurityIT` | 5 | JWT, роли, 401/403 |
+
+Инфраструктура в IT поднимается Testcontainers'ами: Postgres 16, `redis:7`,
+`apache/kafka:3.9.1`. Отступление от плана (п. 5.1 требовал Kafka 3.9.0): образ `apache/kafka:3.9.0`
+с конфигом, который генерирует Testcontainers, не стартует — в `listeners` есть
+`CONTROLLER://0.0.0.0:9094`, а в `advertised.listeners` контроллерского адреса нет, и брокер
+падает на валидации «advertised.listeners cannot use the nonroutable meta-address 0.0.0.0»
+(проверено тремя `docker run` с разным набором переменных). В 3.9.1 та же конфигурация доходит до
+`RECOVERY → RUNNING`. Паттерн зафиксирован и в `infra/docker-compose.yml`.
+
+### Проверка на живом стеке
+
+Стек: `APP_PORT=28080`, образ пересобран из кода этапа 5.
+
+**Кэш (cache-aside).** Три клика по коду `Q8I` → `shortener_cache_requests_total{result="miss"} 1.0`,
+`{result="hit"} 2.0`. В Redis: `GET link:Q8I` = целевой URL, `TTL link:Q8I` = 3599,
+`GET link-id:Q8I` = id ссылки — то есть для редиректа и события клика БД больше не запрашивается.
+
+**Асинхронные клики.** После 3 кликов в `click_events` 3 строки. Consumer выключен
+(`APP_CLICKS_CONSUMER_ENABLED=false`): 10 редиректов, в `click_events` по-прежнему 6 строк, а
+`kafka-consumer-groups.sh --describe --group click-writer` показывает `LAG 10` на партиции 2
+(события с одним `linkId` key'уются вместе — все попадают в одну партицию). После включения
+консьюмера: `CURRENT-OFFSET 16 / LOG-END-OFFSET 16 / LAG 0`, `click_events` 6 → 16. Ничего не
+потерялось.
+
+**Деградация при отказе Redis.** `docker stop redis` → редиректы остаются 302, время отклика
+≈0,43 с (поход в БД), `shortener.cache.requests{result="error"}` 0 → 2.0. После старта Redis
+счётчик `hit` продолжает расти (2.0 → 3.0). Приложение не падает и не отдаёт 5xx.
+
+**Деградация при отказе Kafka.** `docker stop kafka` → редиректы 302 за 11–22 мс: `max.block.ms=500`
+не даёт продусеру блокировать запрос. `shortener_clicks_publish_errors_total` вырос с 0.0 до 3.0
+примерно через **2 минуты** после кликов — это `delivery.timeout.ms` (по умолчанию 120 с) срабатывает
+асинхронно в callback, а не в момент запроса. Проверять эту метрику сразу после кликов бессмысленно;
+для алерта нужен период ≥ 2 мин.
+
+**Rate limit.** `RATE_LIMIT_CREATE_PER_MINUTE=10`: десять `201`, одиннадцатый — `HTTP/1.1 429` с
+`Retry-After: 5` и сообщением про слишком много созданий ссылок. В `.env` для автотестов стоит 1000
+(см. комментарий в `infra/.env.example`), иначе сьют этапа 4 начал бы падать на 429.
+
+**Удаление и лимит кликов.** `EXISTS link:<code>` 1 → `DELETE` 204 → `EXISTS` 0 → следующий клик 410
+(кэш не «прогревается» ошибочным ответом). Ссылка с `maxClicks=3`: `302 302 302 410`, оба ключа
+Redis отсутствуют (`maxClicks`-ссылки не кэшируются — иначе счётчик в БД отстал бы от кэша),
+`click_count` = 3.
+
+**Метрики.** `/actuator/prometheus` отдаёт `http_server_requests_seconds_bucket` (345 строк
+лейблов — гистограмма перцентилей включена), `shortener_cache_requests_total`,
+`shortener_clicks_publish_errors_total`, `hikaricp_connections`, `jvm_memory_used_bytes` и
+`kafka_consumer_fetch_manager_records_lag` по партициям 0/1/2 — последняя появляется бесплатно,
+Kafka-клиент сам регистрирует своего Micrometer-коллектора, отдельный `MicrometerConsumerListener`
+не подключали.
+
+**Регресс.** Автотесты этапа 4 запущены без изменений: `Tests run: 38, Failures: 0, Errors: 0`,
+`BUILD SUCCESS` (п. 5.8 плана — сьют не должен правиться).
+
+### Где смотреть результаты
+
+`.github/workflows/service-tests.yml` на каждом push и PR гоняет `./mvnw -B verify`, печатает
+таблицу «юнит / интеграционные / покрытие» в сводку прогона (`scripts/test-report-summary.py`),
+кладёт HTML-отчёт JaCoCo и XML-протоколы тестов в артефакты `service-coverage` и
+`service-test-reports`, а на `main` обновляет `docs/coverage.json` — из него рисуется бейдж
+покрытия в `README.md`. Локально та же таблица: `python scripts\test-report-summary.py
+shortener-service\target docs\coverage.json`.
