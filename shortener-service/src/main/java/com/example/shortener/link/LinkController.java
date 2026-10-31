@@ -3,6 +3,7 @@ package com.example.shortener.link;
 import com.example.shortener.link.dto.CreateLinkRequest;
 import com.example.shortener.link.dto.LinkResponse;
 import com.example.shortener.link.dto.LinkStatsResponse;
+import com.example.shortener.ratelimit.CreateLinkRateLimiter;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import jakarta.validation.Valid;
@@ -29,21 +30,26 @@ import org.springframework.web.bind.annotation.RestController;
 public class LinkController {
 
     private final LinkService links;
+    private final CreateLinkRateLimiter rateLimit;
 
-    public LinkController(LinkService links) {
+    public LinkController(LinkService links, CreateLinkRateLimiter rateLimit) {
         this.links = links;
+        this.rateLimit = rateLimit;
     }
 
     @Operation(summary = "Создать ссылку", responses = {
             @ApiResponse(responseCode = "201", description = "Ссылка создана"),
             @ApiResponse(responseCode = "400", description = "Некорректный url, alias, expiresAt или maxClicks"),
             @ApiResponse(responseCode = "401", description = "Нет токена"),
-            @ApiResponse(responseCode = "409", description = "Alias занят")
+            @ApiResponse(responseCode = "409", description = "Alias занят"),
+            @ApiResponse(responseCode = "429", description = "Превышен лимит создания ссылок в минуту")
     })
     @PostMapping
     public ResponseEntity<LinkResponse> create(@AuthenticationPrincipal Jwt jwt,
                                                @Valid @RequestBody CreateLinkRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(links.create(userId(jwt), request));
+        Long userId = userId(jwt);
+        rateLimit.acquire(userId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(links.create(userId, request));
     }
 
     @Operation(summary = "Свои ссылки", responses = {

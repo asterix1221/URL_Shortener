@@ -7,6 +7,16 @@ spring:
     hibernate:
       ddl-auto: validate
     open-in-view: false
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      timeout: 200ms
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    producer:
+      properties:
+        max.block.ms: 500
 
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
@@ -14,12 +24,22 @@ app:
     secret: ${JWT_SECRET:}
     ttl-seconds: ${JWT_TTL_SECONDS:3600}
   ip-salt: ${IP_SALT:change_me_ip_salt}
+  cache:
+    ttl-seconds: 3600
+  rate-limit:
+    create-per-minute: ${RATE_LIMIT_CREATE_PER_MINUTE:10}
+  clicks:
+    consumer-enabled: ${APP_CLICKS_CONSUMER_ENABLED:true}
 
 management:
   endpoints:
     web:
       exposure:
-        include: health
+        include: health,prometheus
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 springdoc:
   swagger-ui:

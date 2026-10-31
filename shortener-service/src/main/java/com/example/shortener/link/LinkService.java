@@ -1,5 +1,8 @@
 package com.example.shortener.link;
 
+import com.example.shortener.cache.LinkCache;
+import com.example.shortener.clicks.ClickEventMessage;
+import com.example.shortener.clicks.ClickEventPublisher;
 import com.example.shortener.common.Base62;
 import com.example.shortener.common.BadRequestException;
 import com.example.shortener.common.ConflictException;
@@ -33,14 +36,19 @@ public class LinkService {
 
     private final LinkRepository links;
     private final ClickEventRepository clicks;
+    private final LinkCache cache;
+    private final ClickEventPublisher clickEvents;
     private final String baseUrl;
     private final String ipSalt;
 
-    public LinkService(LinkRepository links, ClickEventRepository clicks,
+    public LinkService(LinkRepository links, ClickEventRepository clicks, LinkCache cache,
+                       ClickEventPublisher clickEvents,
                        @Value("${app.base-url}") String baseUrl,
                        @Value("${app.ip-salt}") String ipSalt) {
         this.links = links;
         this.clicks = clicks;
+        this.cache = cache;
+        this.clickEvents = clickEvents;
         this.baseUrl = baseUrl;
         this.ipSalt = ipSalt;
     }
@@ -81,13 +89,28 @@ public class LinkService {
 
     @Transactional
     public String redirect(String code, String ip, String userAgent, String referrer) {
+        LinkCache.Cached cached = cache.find(code);
+        if (cached != null) {
+            publishClick(cached.linkId(), ip, userAgent, referrer);
+            return cached.originalUrl();
+        }
+
         Link link = links.findByCode(code)
                 .orElseThrow(() -> new NotFoundException("link not found: " + code));
-        if (links.increaseClickCount(link.getId()) == 0) {
+        if (!link.isActive() || (link.getExpiresAt() != null && !link.getExpiresAt().isAfter(Instant.now()))) {
             throw new GoneException("link is not available: " + code);
         }
-        clicks.save(new ClickEvent(link.getId(), Instant.now(), hashIp(ip), userAgent, referrer));
+        // атомарный guard нужен только ссылкам с лимитом кликов: он же и проверяет доступность
+        if (link.getMaxClicks() != null && links.increaseClickCount(link.getId()) == 0) {
+            throw new GoneException("link is not available: " + code);
+        }
+        cache.put(link);
+        publishClick(link.getId(), ip, userAgent, referrer);
         return link.getOriginalUrl();
+    }
+
+    private void publishClick(Long linkId, String ip, String userAgent, String referrer) {
+        clickEvents.publish(new ClickEventMessage(linkId, Instant.now(), hashIp(ip), userAgent, referrer));
     }
 
     @Transactional(readOnly = true)
@@ -102,7 +125,9 @@ public class LinkService {
 
     @Transactional
     public void delete(Long userId, String code) {
-        links.deactivate(requireOwned(userId, code).getId());
+        Link link = requireOwned(userId, code);
+        links.deactivate(link.getId());
+        cache.evict(code);
     }
 
     @Transactional(readOnly = true)

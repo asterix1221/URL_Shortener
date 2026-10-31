@@ -31,8 +31,10 @@ class LinkLifecycleIT extends AbstractIT {
 
         assertThat(redirect.statusCode()).isEqualTo(302);
         assertThat(redirect.headers().firstValue("Location")).hasValue("https://example.com/target-1");
-        assertThat(clickEvents(link.code())).isEqualTo(1);
-        assertThat(clickCount(link.code())).isEqualTo(1);
+        awaitClickEvents(link.code(), 1);
+        // Счётчик кликов атомарно двигает только строка с лимитом: без maxClicks редирект
+        // не обновляет links и не ждёт записи события.
+        assertThat(clickCount(link.code())).isZero();
         assertThat(jdbc.queryForObject("""
                 SELECT e.ip_hash FROM click_events e JOIN links l ON l.id = e.link_id WHERE l.code = ?
                 """, String.class, link.code()))
@@ -49,7 +51,7 @@ class LinkLifecycleIT extends AbstractIT {
         assertThat(click(link.code(), null).statusCode()).isEqualTo(410);
 
         assertThat(clickCount(link.code())).isEqualTo(2);
-        assertThat(clickEvents(link.code())).isEqualTo(2);
+        awaitClickEvents(link.code(), 2);
     }
 
     @Test
@@ -79,6 +81,7 @@ class LinkLifecycleIT extends AbstractIT {
         click(link.code(), "https://other-referrer.example.com");
         click(link.code(), null);
         click(link.code(), null);
+        awaitClickEvents(link.code(), 5);
 
         LinkStatsResponse stats = rest.exchange("/api/links/" + link.code() + "/stats", HttpMethod.GET,
                 new HttpEntity<>(bearer(token)), LinkStatsResponse.class).getBody();
