@@ -11,3 +11,7 @@ shortener-loadtests/target/
 shortener-loadtests/src/test/resources/codes.csv
 shortener-loadtests/src/test/resources/stats.csv
 .DS_Store
+
+# рабочие документы, не публичные
+/PLAN.md
+/CLAUDE.md
