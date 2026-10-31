@@ -70,7 +70,10 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/**").authenticated()
                         .anyRequest().permitAll())
-                .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt.decoder(jwtDecoder)))
+                .oauth2ResourceServer(oauth2 -> oauth2
+                        .jwt(jwt -> jwt.decoder(jwtDecoder))
+                        // без этого ресурс-сервер отвечает пустым 401 на испорченный токен
+                        .authenticationEntryPoint(errorWriter))
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(errorWriter)
                         .accessDeniedHandler(errorWriter))

@@ -46,10 +46,16 @@ docs/                 отчёты по тестам и нагрузочным �
 | Что | Команда |
 |---|---|
 | Юнит + интеграционные (Testcontainers) | `cd shortener-service; .\mvnw.cmd clean verify` |
+| Только юнит-тесты | `cd shortener-service; .\mvnw.cmd test` |
+| Покрытие (правило ≥ 80% по строкам) | `start target\site\jacoco\index.html` после `clean verify` |
 | API-автотесты (нужен поднятый стек) | `cd shortener-autotests; .\mvnw.cmd test "-DbaseUrl=http://localhost:8080"` |
 | Only smoke / only regression | добавить `"-Dgroups=smoke"` или `"-Dgroups=regression"` |
 | Allure-отчёт | `.\mvnw.cmd allure:serve` |
 | Нагрузка | `.\scripts\run-load.ps1 -Sim RedirectSimulation -Profile constant -Rps 50 -Duration 120` |
+
+Интеграционные тесты поднимают Postgres 16 в Testcontainers — нужен запущенный Docker.
+База для тестов всегда чистая: контейнер создаётся под прогон, `jdbc:postgresql://localhost:<свободный порт>/test`.
+Мутационная проверка тестов — в `docs/test-validation.md`.
 
 ## Ссылки
 
