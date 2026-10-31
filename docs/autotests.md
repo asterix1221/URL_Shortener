@@ -157,7 +157,9 @@ Postgres и приложение (`shortener-service/Dockerfile`). Порт хо
 ## Этап 5: кэш, асинхронные клики, rate limit
 
 Юнит + интеграционные (`cd shortener-service; .\mvnw.cmd clean verify`): **73 юнит-теста и
-19 интеграционных, BUILD SUCCESS**, покрытие по строкам JaCoCo **91,1%**.
+19 интеграционных, BUILD SUCCESS**, покрытие по строкам JaCoCo **90,0%** (правило ≥ 80% выполняется).
+Цифра снята с `clean verify`: более ранние 91,1% получались по `jacoco.exec`, накопленному между
+прогонами без очистки, к `clean`-прогону он не относится.
 
 | Класс IT | Тестов | Что проверяет |
 |---|---|---|
@@ -228,3 +230,36 @@ Kafka-клиент сам регистрирует своего Micrometer-ко�
 `service-test-reports`, а на `main` обновляет `docs/coverage.json` — из него рисуется бейдж
 покрытия в `README.md`. Локально та же таблица: `python scripts\test-report-summary.py
 shortener-service\target docs\coverage.json`.
+
+## Проверка gateway (nginx)
+
+Стек с `gateway` на `nginx:1.30.6` (`APP_PORT=28080 → 80`), у приложения порт наружу не
+публикуется (`docker ps`: `infra-app-1 → 8080/tcp`, без проброса; `infra-gateway-1 →
+0.0.0.0:28080->80/tcp, Up (healthy)`).
+
+| Проверка | Реальный результат |
+|---|---|
+| `scripts/smoke.ps1 -BaseUrl http://localhost:28080` | `no token: 401`, `created: Q8q → http://localhost:28080/Q8q`, `redirects: 302 302 410`, `totalClicks: 2` |
+| Автотесты этапа 4 против gateway, без изменений | `Tests run: 38, Failures: 0, Errors: 0` (Auth 9, Redirect 5, Security 6, Stats 6, LinkCreate 12), BUILD SUCCESS за 15,5 с |
+| Клиентский IP (`server.forward-headers-strategy: native`) | клик с `X-Forwarded-For: 198.51.100.9` → в `click_events.ip_hash` `562c574e19…731d9`, что ровно SHA-256 от `198.51.100.9` + соль; клик без заголовка → `b2e532a6b5…6b7063` = хостовый адрес моста Docker (`172.21.0.1`), он же видно в `gateway.log` |
+| Метрики снаружи | `GET /actuator/prometheus` через gateway → 403 (`access forbidden by rule` в логе nginx); из контейнера gateway на `http://app:8080/actuator/prometheus` → 200 |
+| Тело запроса | POST с телом ~30 КБ → 413 ещё до сервиса (`client_max_body_size 16k`) |
+| Health | `GET /actuator/health` → `{"status":"UP"}`, `GET /gateway-health` → `ok` (healthcheck контейнера) |
+| OpenAPI через прокси | `/v3/api-docs` → `servers[0].url = http://localhost:28080` |
+
+Разбор двух мест, где прокси меняет поведение приложения:
+
+- **Порт в OpenAPI.** Сначала был `http://localhost` без порта. Причина:
+  `forward-headers-strategy: native` заставляет Tomcat брать порт из `X-Forwarded-Port`, а при
+  его отсутствии — порт схемы по умолчанию (80), и `Host: localhost:28080` уже не спасает. Лечится `map $http_host` в nginx:
+  порт берётся из заголовка Host клиента, при `listen 443` так же сработает `$server_port`.
+  `$host` для `proxy_set_header Host` не подходит — он обрезает порт.
+- **IP клиента в статистике.** Без `X-Forwarded-For` все клики записались бы с адресом контейнера
+  nginx (`172.21.0.5`); таблица выше показывает, что хеш считается от адреса клиента.
+  Подделать заголовок снаружи нельзя: Tomcat применяет `X-Forwarded-*` только когда запрос пришёл
+  от внутреннего адреса, а снаружи приложение больше не доступно — порт не публикуется.
+
+Логи gateway пишутся в формате с `$request_time` и `$upstream_response_time`
+(`/var/log/nginx/gateway.log`), иначе «тормозит прокси или сервис» не разделить:
+`172.21.0.1 - GET /Q8r HTTP/1.1 "302" 0.021 s upstream=172.21.0.5:8080 upstream_time=0.020` и
+тот же код на кэш-хите `0.007 s`.

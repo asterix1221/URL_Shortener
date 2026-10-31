@@ -18,6 +18,15 @@ spring:
       properties:
         max.block.ms: 500
 
+server:
+  # Перед приложением стоит nginx (infra/nginx): адрес клиента, схема и порт берутся из
+  # X-Forwarded-*. Без этого getRemoteAddr() возвращает внутренний IP прокси, и все клики в
+  # статистике пишутся с одним адресом. Tomcat применяет заголовки только когда запрос пришёл
+  # от внутреннего адреса — снаружи подделать X-Forwarded-For не получится. Gateway отдаёт и
+  # X-Forwarded-Port: при X-Forwarded-Proto без него Tomcat подставил бы порт схемы по
+  # умолчанию, и OpenAPI потерял бы внешний порт.
+  forward-headers-strategy: native
+
 app:
   base-url: ${APP_BASE_URL:http://localhost:8080}
   jwt:
