@@ -8,6 +8,14 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
 
+/**
+ * Один переход по короткой ссылке — строка журнала {@code click_events}, из которого потом
+ * считается статистика.
+ *
+ * <p>Создаётся только консьюмером Kafka ({@code ClickEventWriter}), на пути редиректа его нет.
+ * {@code clickedAt} приходит в самом событии, а не генерируется при вставке, поэтому время клика
+ * соответствует переходу клиента, а не моменту, когда консьюмер до события добрался.
+ */
 @Entity
 @Table(name = "click_events")
 public class ClickEvent {
@@ -22,6 +30,10 @@ public class ClickEvent {
     @Column(name = "clicked_at", nullable = false)
     private Instant clickedAt;
 
+    /**
+     * SHA-256 от адреса клиента с солью из {@code app.ip-salt}; длина 64 — ровно hex-представление.
+     * Сам IP в базу не пишется, обратное восстановление не предполагается.
+     */
     @Column(name = "ip_hash", length = 64)
     private String ipHash;
 

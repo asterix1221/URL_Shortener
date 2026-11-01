@@ -24,10 +24,26 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Бизнес-логика ссылок: создание, редирект со списанием клика, постраничный список,
+ * статистика и удаление. Всё, что связано с HTTP, кодами и правами доступа, живёт здесь;
+ * контроллеры только пробрасывают сюда принципала из JWT.
+ *
+ * <p>Все методы работают в транзакции; методы чтения помечены {@code readOnly = true}.
+ * Доступ к чужой ссылке (по коду) отдаёт {@code ForbiddenException}, а не {@code NotFound}:
+ * код публичен через редирект, поэтому факт существования ссылки не секрет.
+ */
 @Service
 public class LinkService {
 
+    /** Алиас совпадает по алфавиту и длине с кодом Base62, чтобы редирект не делал исключений. */
     private static final Pattern ALIAS_PATTERN = Pattern.compile("^[A-Za-z0-9_-]{3,32}$");
+
+    /**
+     * Коды, которые нельзя отдавать под алиасы: они принадлежат маршрутам приложения
+     * ({@code /api}, {@code /actuator}, {@code /swagger-ui}, {@code /v3}) и редирект по такому
+     * коду всё равно был бы недоступен.
+     */
     private static final Set<String> RESERVED_CODES = Set.of("api", "actuator", "swagger-ui", "v3");
 
     private final LinkRepository links;
@@ -37,6 +53,14 @@ public class LinkService {
     private final String baseUrl;
     private final IpHasher ipHasher;
 
+    /**
+     * @param links       репозиторий ссылок; id берётся из последовательности {@code link_seq}
+     * @param clicks      репозиторий событий кликов (нужен только для статистики)
+     * @param cache       кэш адресов в Redis; редирект без него работал бы в один запрос больше
+     * @param clickEvents публикация события клика в Kafka
+     * @param baseUrl     значение {@code app.base-url}: из него собирается {@code shortUrl}
+     * @param ipHasher    хешер адреса клиента (IP в базу не попадает)
+     */
     public LinkService(LinkRepository links, ClickEventRepository clicks, LinkCache cache,
                        ClickEventPublisher clickEvents,
                        @Value("${app.base-url}") String baseUrl,
@@ -49,6 +73,21 @@ public class LinkService {
         this.ipHasher = ipHasher;
     }
 
+    /**
+     * Создаёт ссылку: проверяет адрес и параметры, выбирает код (алиас или Base62 от id) и
+     * сохраняет активную запись.
+     *
+     * <p>Код генерируется из id, который заранее берётся из {@code link_seq}, поэтому два
+     * соседних вызова не могут выдать одинаковый код; занятость алиаса проверяется по индексу.
+     *
+     * @param userId  владелец из JWT
+     * @param request адрес, необязательные алиас, {@code expiresAt} и {@code maxClicks}
+     * @return созданная ссылка, включая {@code shortUrl} на базе {@code app.base-url}
+     * @throws InvalidUrlException   если адрес не http(s) или без хоста
+     * @throws BadRequestException   если {@code expiresAt} в прошлом, {@code maxClicks} &lt; 1,
+     *                               алиас не проходит {@code ALIAS_PATTERN} или зарезервирован
+     * @throws ConflictException     если алиас уже занят
+     */
     @Transactional
     public LinkResponse create(Long userId, CreateLinkRequest request) {
         String url = UrlValidator.requireHttpUrl(request.url());
@@ -83,6 +122,29 @@ public class LinkService {
         return toResponse(saved);
     }
 
+    /**
+     * Возвращает адрес-оригинал по коду и регистрирует клик.
+     *
+     * <p>Сначала пробуется кэш: попадание — это один запрос в Redis и публикация события, БД не
+     * трогается. В промахе читается ссылка, проверяется доступность (активность и
+     * {@code expiresAt}), и для ссылок с {@code maxClicks} счётчик списывается атомарным
+     * {@code UPDATE} — ноль строк означает «лимит исчерпан прямо сейчас».
+     *
+     * <p>Ссылки с {@code maxClicks} в кэш не кладутся (см. {@code LinkCache.put}), поэтому их
+     * доступность всегда проверяется по свежему счётчику в базе.
+     *
+     * <p>Событие клика публикуется в Kafka и не ждёт записи: адрес, user-agent и referrer
+     * сохраняются в {@code click_events} фоновым консьюмером, поэтому статистика
+     * «догоняет» редирект с задержкой в сотни миллисекунд.
+     *
+     * @param code      короткий код из пути
+     * @param ip        адрес клиента из {@code HttpServletRequest}, в базу уходит только его хеш
+     * @param userAgent заголовок {@code User-Agent}, может быть {@code null}
+     * @param referrer  заголовок {@code Referer}, может быть {@code null}
+     * @return оригинальный адрес для редиректа
+     * @throws NotFoundException ссылка с таким кодом никогда не существовала
+     * @throws GoneException     ссылка удалена, просрочена или исчерпала {@code maxClicks}
+     */
     @Transactional
     public String redirect(String code, String ip, String userAgent, String referrer) {
         LinkCache.Cached cached = cache.find(code);
@@ -109,16 +171,34 @@ public class LinkService {
         clickEvents.publish(new ClickEventMessage(linkId, Instant.now(), ipHasher.hash(ip), userAgent, referrer));
     }
 
+    /**
+     * Ссылки одного пользователя страницей. Порядок внутри страницы не задаётся явно
+     * ({@code findByUserId} без {@code OrderBy}), поэтому он не гарантирован.
+     *
+     * @param page номер страницы, отсчёт от нуля
+     * @param size размер страницы (контроллер ограничивает сверху 100)
+     */
     @Transactional(readOnly = true)
     public Page<LinkResponse> list(Long userId, int page, int size) {
         return links.findByUserId(userId, PageRequest.of(page, size)).map(this::toResponse);
     }
 
+    /**
+     * Одна своя ссылка по коду — то же представление, что в списке и при создании.
+     *
+     * @throws NotFoundException ссылка отсутствует
+     * @throws ForbiddenException ссылка принадлежит другому пользователю
+     */
     @Transactional(readOnly = true)
     public LinkResponse getOwned(Long userId, String code) {
         return toResponse(requireOwned(userId, code));
     }
 
+    /**
+     * «Удаляет» ссылку: деактивирует запись и выбрасывает обе кэш-ключи кода. Строка в базе
+     * и уже записанные события кликов остаются — статистика и внешние ссылки на id не ломаются,
+     * а редирект по такому коду с этого момента отдаёт 410.
+     */
     @Transactional
     public void delete(Long userId, String code) {
         Link link = requireOwned(userId, code);
@@ -126,6 +206,17 @@ public class LinkService {
         cache.evict(code);
     }
 
+    /**
+     * Сводка кликов по своей ссылке: общее число, разбивка по дням (UTC) и топ-10 referrer'ов.
+     *
+     * <p>Считается по {@code click_events}, то есть по уже записанным консьюмером событиям;
+     * клики, которые ещё в пути из Kafka, в цифрах отсутствуют. Дни считаются в UTC, потому что
+     * {@code clicked_at} хранится instant'ом, а разбивка делается в Postgres через
+     * {@code date_trunc}.
+     *
+     * @throws NotFoundException ссылка отсутствует
+     * @throws ForbiddenException ссылка принадлежит другому пользователю
+     */
     @Transactional(readOnly = true)
     public LinkStatsResponse stats(Long userId, String code) {
         Link link = requireOwned(userId, code);

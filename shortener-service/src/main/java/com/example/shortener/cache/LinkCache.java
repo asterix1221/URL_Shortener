@@ -34,9 +34,28 @@ public class LinkCache {
         this.ttlSeconds = ttlSeconds;
     }
 
+    /**
+     * Пара, доставаемая из кэша одной операцией: id ссылки (он нужен событию клика, чтобы не
+     * ходить в базу) и её оригинальный URL для редиректа.
+     */
     public record Cached(Long linkId, String originalUrl) {
     }
 
+    /**
+     * Читает оба ключа кода — {@code link:<code>} и {@code link-id:<code>} — одной операцией
+     * {@code MGET}.
+     *
+     * <p>Возвращает {@code null} в двух случаях: кэш промахнулся (Redis вернул пустой ответ либо
+     * хоть один из двух ключей отсутствует) и Redis недоступен ({@code DataAccessException}
+     * пишется в лог как предупреждение). Второй случай отличается только метрикой, поэтому
+     * вызывающий код обязан при {@code null} идти в базу и не может считать ссылку отсутствующей.
+     *
+     * <p>Счётчик {@code shortener.cache.requests} с тегом {@code result} получает {@code hit},
+     * {@code miss} или {@code error}.
+     *
+     * @param code короткий код ссылки
+     * @return {@link Cached} при полностью заполненном кэше, иначе {@code null}
+     */
     public Cached find(String code) {
         List<String> values;
         try {
@@ -54,6 +73,22 @@ public class LinkCache {
         return new Cached(Long.valueOf(values.get(1)), values.get(0));
     }
 
+    /**
+     * Прогревает кэш по уже прочитанной из базы ссылке: оба ключа кода записываются с одинаковым
+     * TTL.
+     *
+     * <p>Запись пропускается, если у ссылки задан {@code maxClicks} (её доступность зависит от
+     * счётчика в базе) либо она не активна, и если полученный TTL не положительный. Иначе TTL
+     * считается как {@code min(app.cache.ttl-seconds, секунд до expiresAt)}: время до истечения
+     * не берётся отрицательным, а ссылка без {@code expiresAt} получает конфигурационный TTL.
+     *
+     * <p>Метод ничего не бросает: при {@code DataAccessException} запись просто не происходит, в
+     * лог пишется предупреждение. Тега о прогреве в {@code shortener.cache.requests} нет —
+     * счётчик затрагивает только {@code find}.
+     *
+     * @param link ссылка, прочитанная из базы; неактивные и ссылки с {@code maxClicks}
+     *             игнорируются без ошибки
+     */
     public void put(Link link) {
         if (link.getMaxClicks() != null || !link.isActive()) {
             return;
@@ -70,6 +105,16 @@ public class LinkCache {
         }
     }
 
+    /**
+     * Удаляет оба ключа кода одной операцией, чтобы после деактивации ссылки редирект больше не
+     * обслуживался из кэша.
+     *
+     * <p>Ответ Redis (сколько ключей удалено) не проверяется, счётчики не обновляются. При
+     * {@code DataAccessException} ошибка только логируется: удаление не повторяется, и до
+     * истечения TTL кэш может отдавать устаревший адрес.
+     *
+     * @param code короткий код ссылки
+     */
     public void evict(String code) {
         try {
             redis.delete(List.of(URL_KEY + code, ID_KEY + code));

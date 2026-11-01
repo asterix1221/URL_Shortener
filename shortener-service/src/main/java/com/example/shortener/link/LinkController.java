@@ -24,6 +24,16 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+/**
+ * Аутентифицированный CRUD ссылок владельца по адресу {@code /api/links}. Контроллер ничего
+ * не знает ни о базе, ни о кэше: разбор доступности, права и статистика живут в
+ * {@code LinkService}, здесь остаются только принципал из JWT, валидация тела, лимит создания
+ * и коды ответов, зафиксированные в аннотациях {@code @Operation}.
+ *
+ * <p>Владелец берётся из {@code sub} токена, поэтому обращение к чужой ссылке — это 403 из
+ * сервиса, а не из фильтра безопасности. Публичный редирект без токена — в
+ * {@code RedirectController}.
+ */
 @RestController
 @RequestMapping("/api/links")
 @Validated
