@@ -1,0 +1,55 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<!--
+  Определение job для Jenkins: Pipeline «script from SCM», берёт Jenkinsfile из репозитория.
+  Файл не подключается автоматически — его один раз загружают в Jenkins (команда в
+  docs/ci-jenkins.md), после чего job живёт в JENKINS_HOME как обычный конфиг.
+
+  Ветвь задаётся параметром сборки, а не зашита: так один и тот же job прогоняет и
+  feature-ветку до merge, и main после него. Jenkins подставляет GIT_BRANCH в BranchSpec.
+-->
+<flow-definition plugin="workflow-job">
+  <description>Полный CI-прогон: тесты сервиса, образ, CI-стек в Docker Compose, API-автотесты, Allure.</description>
+  <keepDependencies>false</keepDependencies>
+  <properties>
+    <jenkins.model.BuildDiscarderProperty/>
+    <hudson.model.ParametersDefinitionProperty>
+      <parameterDefinitions>
+        <hudson.model.StringParameterDefinition>
+          <name>GIT_BRANCH</name>
+          <description>Ветка, из которой берут Jenkinsfile и исходники (например main или ci/jenkins-pipeline).</description>
+          <defaultValue>main</defaultValue>
+          <trim>true</trim>
+        </hudson.model.StringParameterDefinition>
+      </parameterDefinitions>
+    </hudson.model.ParametersDefinitionProperty>
+  </properties>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsScmFlowDefinition" plugin="workflow-cps">
+    <scm class="hudson.plugins.git.GitSCM" plugin="git">
+      <configVersion>2</configVersion>
+      <userRemoteConfigs>
+        <hudson.plugins.git.UserRemoteConfig>
+          <url>https://github.com/asterix1221/URL_Shortener.git</url>
+        </hudson.plugins.git.UserRemoteConfig>
+      </userRemoteConfigs>
+      <branches>
+        <hudson.plugins.git.BranchSpec>
+          <name>*/${GIT_BRANCH}</name>
+        </hudson.plugins.git.BranchSpec>
+      </branches>
+      <doGenerateSubmoduleConfigurations>false</doGenerateSubmoduleConfigurations>
+      <browser class="hudson.plugins.git.browser.GithubWeb">
+        <url>https://github.com/asterix1221/URL_Shortener</url>
+      </browser>
+      <submoduleCfg class="empty-list"/>
+      <extensions/>
+    </scm>
+    <scriptPath>Jenkinsfile</scriptPath>
+    <!--
+      lightweight=false: Jenkinsfile берут полным clone, а не «лёгким» запросом. Лёгкий
+      режим не подставляет параметр GIT_BRANCH в BranchSpec, и сборка уехала бы в main.
+    -->
+    <lightweight>false</lightweight>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>

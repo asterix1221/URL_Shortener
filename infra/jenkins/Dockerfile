@@ -19,8 +19,12 @@ ENV MAVEN_HOME=/opt/maven \
 # отработает, wizard оставит контейнер страницей «разблокировать», и job не создать скриптом.
 ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
 
-# Плагины не ставим: в lts-образ уже входит рекомендуемый набор (pipeline, git,
-# credentials-binding, HTML Publisher), его хватает для Jenkinsfile. Если понадобится
-# дополнительный — версия фиксируется числом и ставится так:
-#   RUN jenkins-plugin-cli --plugins "example-plugin:1.2.3"
+# Плагины. В lts-образ они НЕ входят (в /usr/share/jenkins/ref их ноль, и API
+# pluginManager отдаёт пустой список), а без них не работает ни declarative-пайплайн
+# (workflow-job/workflow-cps), ни git, ни шаг junit, ни timestamps(). Версии зафиксированы
+# в plugins.txt числом — update center предлагает «самое свежее под ядро», и без файла
+# пересборка образа давала бы другой набор каждый раз.
+COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
+RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt \
+        --war /usr/share/jenkins/jenkins.war
 

@@ -39,10 +39,11 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/links -Headers @{ Autho
 
 ```
 infra/                docker-compose (gateway nginx, Postgres, Redis, Kafka, Prometheus, Grafana,
-                      приложение) + nginx/nginx.conf
+                      приложение) + nginx/nginx.conf + jenkins/ (образ CI, плагины, job)
 shortener-service/    Spring Boot сервис
 shortener-autotests/  REST Assured автотесты + Allure
 shortener-loadtests/  Gatling-симуляции
+Jenkinsfile           полный CI-прогон в Jenkins (тесты → образ → стек → автотесты → Allure)
 scripts/              smoke.ps1, seed.sql, вспомогательные скрипты
 docs/                 отчёты по тестам и нагрузочным экспериментам
 ```
@@ -111,6 +112,33 @@ docs/                 отчёты по тестам и нагрузочным �
 нужен запущенный Docker.
 База для тестов всегда чистая: контейнер создаётся под прогон, `jdbc:postgresql://localhost:<свободный порт>/test`.
 Мутационная проверка тестов — в `docs/test-validation.md`.
+
+## CI/CD
+
+Два контура, и оба видны из README.
+
+**GitHub Actions** (`service-tests.yml`, `autotests.yml`) — то, что проверяет сам GitHub:
+юнит и интеграционные тесты, прогон автотестов против стека, который workflow поднимает на
+раннере, бейджи и файл покрытия. Плагины и версии в нём зафиксированы числами.
+
+**Jenkins** (`Jenkinsfile` + `infra/jenkins/`) — self-hosted, поднимается этим же
+compose-файлом:
+
+```powershell
+docker compose -f infra\docker-compose.yml --env-file infra\.env --profile ci up -d jenkins
+# UI: http://localhost:18088 (порт bound к 127.0.0.1), логин из infra\.env
+```
+
+Прогон `shortener-ci`: `mvn verify` (юнит + интеграционные + JaCoCo) → `docker build` под
+тегом `shortener-service:ci-<номер>` → тот же тег встаёт в CI-стек `shortener-ci` на портах
+28180/5442/6389/29092 (не пересекаются с рабочей копией) → ожидание `/actuator/health` →
+API-автотесты через gateway → Allure в артефакты → `down -v` в `post: always`. Секреты
+стенда генерируются `openssl rand` на время сборки и в репозиторий не попадают.
+
+Отдельно от Actions этот контур нужен потому, что у него есть docker-демон с постоянной
+сетью: «собрать образ → поднять им полный стек → дёрнуть его по HTTP» на раннере GitHub не
+воспроизводится. Установка job'а, плагинный набор с фиксированными версиями, права на сокет
+и вывод реального прогона — `docs/ci-jenkins.md`.
 
 ## Ссылки
 
