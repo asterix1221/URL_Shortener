@@ -17,6 +17,9 @@ API-автотесты (REST Assured + Allure) и нагрузочные сце�
 Copy-Item infra\.env.example infra\.env
 docker compose -f infra\docker-compose.yml --env-file infra\.env up -d --build
 
+# 1b. мониторинг для нагрузочных прогонов — отдельный профиль (в CI не поднимается)
+docker compose -f infra\docker-compose.yml --env-file infra\.env --profile monitoring up -d
+
 # 2. (опционально) запуск сервиса локально с hot reload, вместо контейнера
 $env:JWT_SECRET = "dev-secret-dev-secret-dev-secret-123456"
 cd shortener-service; .\mvnw.cmd spring-boot:run
@@ -177,8 +180,15 @@ API-автотесты через gateway → Allure в артефакты → `
 - Swagger UI: `http://localhost:8080/swagger-ui/index.html` (Authorize — JWT из `/api/auth/login`)
   — адрес через gateway, в `APP_PORT` из `infra/.env`
 - Метрики: снаружи gateway закрывает `/actuator/prometheus` (403); Prometheus скоупит
-  `http://app:8080/actuator/prometheus` внутри сети compose
-- Grafana: `http://localhost:3000` (admin / `GRAFANA_PASSWORD` из `infra/.env`)
+  `http://app:8080/actuator/prometheus` внутри сети compose. Сам Prometheus bound к `127.0.0.1`,
+  цель видна на `http://localhost:9090/api/v1/targets`
+- Grafana: `http://localhost:3000` (admin / `GRAFANA_PASSWORD` из `infra/.env`). Источник данных
+  и дашборд «URL shortener: нагрузка» (10 панелей) подгружаются провижинингом из
+  `infra/grafana/provisioning/` и `infra/grafana/dashboards/`. Файл, появившийся в
+  `dashboards/` уже после старта контейнера, Grafana за пять минут не подхватил — изменения
+  применяются перезапуском (`docker restart infra-grafana-1`)
+- Baseline нагрузочных прогонов (железо, лимиты контейнера, p50/p95/p99, воспроизводимость,
+  скриншот дашборда и ограничения методики) — `docs/baseline.md`
 
 Решения, компромиссы и результаты нагрузочных тестов описаны далее в README; отчёты по
 экспериментам — в `docs/experiments/`.

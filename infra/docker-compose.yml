@@ -65,6 +65,10 @@ services:
       KAFKA_BOOTSTRAP: kafka:19092
       APP_CLICKS_CONSUMER_ENABLED: ${APP_CLICKS_CONSUMER_ENABLED:-true}
       RATE_LIMIT_CREATE_PER_MINUTE: ${RATE_LIMIT_CREATE_PER_MINUTE:-10}
+    # Лимиты нужны не для экономии, а для воспроизводимости baseline: без них сервис
+    # выбирает все ядра VM и цифры двух прогонов сравнивать нельзя.
+    cpus: "2"
+    mem_limit: 1g
     # Наружу порт приложения не публикуется: единственная точка входа — gateway. Изнутри сети
     # app доступен по app:8080 (Prometheus и healthcheck CI ходят туда же).
     expose:
@@ -84,6 +88,38 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # Профиль monitoring, а не общий стек: и Jenkins-пайплайн, и workflow GitHub поднимают стек
+  # без профилей (`up -d`), а конфиги ниже примонтированы из репозитория — хостовый демон из
+  # DooD этих путей не видит и упал бы ровно так же, как падал gateway (см. docs/ci-jenkins.md).
+  # Плюс Grafana с Prometheus не нужны ни одному тесту, а 2,4 ГБ образов и фоновый scrape
+  # только мешают замерам, если их не просили явно:
+  #   docker compose -f infra\docker-compose.yml --env-file infra\.env --profile monitoring up -d
+  prometheus:
+    profiles: ["monitoring"]
+    image: prom/prometheus:v3.15.1
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      # Только на loopback: у Prometheus нет ни аутентификации, ни авторизации.
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    depends_on:
+      - app
+
+  grafana:
+    profiles: ["monitoring"]
+    image: grafana/grafana:13.3.0
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      # Дашборд отдаётся целиком через provisioning-файлы, встроенный пример не нужен.
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/shortener.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
 
   # Поднимается только с профилем ci: `docker compose --profile ci up -d jenkins`.
   # Jenkins крутится здесь, а не в отдельном стеке, чтобы job собирал проект теми же

@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.example</groupId>
+    <artifactId>shortener-loadtests</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+    <name>shortener-loadtests</name>
+    <description>Нагрузочные сценарии Gatling (Java DSL) для сервиса сокращения ссылок</description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+        <!--
+          Версии зафиксированы числами: прогон, результат которого попал в docs/baseline.md,
+          должен воспроизводиться тем же кодом, а не тем, что Maven подтянет сегодня.
+        -->
+        <gatling.version>3.16.0</gatling.version>
+        <gatling-maven-plugin.version>4.21.12</gatling-maven-plugin.version>
+        <maven-compiler-plugin.version>3.14.0</maven-compiler-plugin.version>
+        <logback.version>1.5.21</logback.version>
+    </properties>
+
+    <dependencies>
+        <!--
+          gatling-charts-highcharts тянет весь рантайм Gatling вместе с Java DSL
+          (io.gatling.javaapi.*) и генератором HTML-отчёта.
+        -->
+        <dependency>
+            <groupId>io.gatling.highcharts</groupId>
+            <artifactId>gatling-charts-highcharts</artifactId>
+            <version>${gatling.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- Gatling сам по себе логи через slf4j; без binder'а вывод был бы глухим. -->
+        <dependency>
+            <groupId>ch.qos.logback</groupId>
+            <artifactId>logback-classic</artifactId>
+            <version>${logback.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>io.gatling</groupId>
+                <artifactId>gatling-maven-plugin</artifactId>
+                <version>${gatling-maven-plugin.version}</version>
+                <configuration>
+                    <!--
+                      Параметры симуляций читаются из переменных окружения, а не из -D:
+                      плагин поднимает отдельную JVM, и system-свойства до неё доходят
+                      не всегда (см. PLAN.md, п. 6.3).
+                    -->
+                    <jvmArgs>
+                        <jvmArg>-Xms1g</jvmArg>
+                        <jvmArg>-Xmx1g</jvmArg>
+                    </jvmArgs>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>
