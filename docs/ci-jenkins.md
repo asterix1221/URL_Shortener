@@ -92,19 +92,54 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
 1. `mvn -B verify` в `shortener-service` — surefire (юнит) + failsafe (интеграционные на
    Testcontainers) + JaCoCo; шаг `junit` публикует протоколы, `archiveArtifacts` — HTML
    отчёт покрытия.
-2. `docker build -t shortener-service:ci-<номер>` — этот тег попадает в compose (`image:
-   shortener-service:${APP_IMAGE_TAG}` у сервиса `app`), поэтому стек поднимает ровно тот
-   образ, который был собран и назван в пайплайне, а не копию `shortener-ci-app`.
-3. `docker compose up -d` в отдельном проекте `shortener-ci` и на своих хост-портах
-   (28180/5442/6389/29092), чтобы не пересекаться с рабочей копией стека. Секреты стенда
-   (`POSTGRES_PASSWORD`, `JWT_SECRET`, `IP_SALT`) генерируются `openssl rand` на одну
-   сборку и не хранятся в репозитории.
+2. `docker build -t shortener-service:ci-<номер>` и `docker compose build gateway` — теги
+   попадают в compose (`image: shortener-service:${APP_IMAGE_TAG}` у сервиса `app` и
+   `shortener-gateway:${APP_IMAGE_TAG}` в оверлее), поэтому стек поднимает ровно те образы,
+   которые были собраны и названы в этой сборке, а не копию `shortener-ci-app` или образ
+   с прошлой сборки.
+3. `docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml up -d` в
+   отдельном проекте `shortener-ci` и на своих хост-портах (28180/5442/6389/29092), чтобы не
+   пересекаться с рабочей копией стека. Секреты стенда (`POSTGRES_PASSWORD`, `JWT_SECRET`,
+   `IP_SALT`) генерируются `openssl rand` на одну сборку и не хранятся в репозитории.
 4. Ожидание `GET /actuator/health` через `host.docker.internal` (60 попыток по 2 с); при
    таймауте в лог сборки кладутся `compose ps` и `logs --tail=120 app gateway`.
 5. `mvn -B test -DbaseUrl=…` в `shortener-autotests` — автотесты идут через gateway nginx,
    то же самое зеркало, что и у ручной проверки.
 6. `post: always` — `allure:report` + архив отчёта, затем `docker compose down -v`: стек
-   сносится вместе с томами, следующий прогон начинается с чистой базы и миграций.
+   сносится вместе с томами, следующий прогон начинается с чистой базы и миграций; образы
+   `ci-<номер>` удаляются по именам (не `--rmi local`, иначе уехал бы и
+   `shortener-jenkins:local` с 71 плагином).
+
+### Bind-монтирования репозитория в DooD не работают
+
+Сборка №2 упала на этапе «Стек: поднимается» — стек стартовал, но контейнер `gateway` не
+создался (постфикс времени в логе Jenkins убран):
+
+```
+Error response from daemon: failed to create task for container: failed to create shim task:
+OCI runtime create failed: runc create failed: unable to start container process:
+error during container init: error mounting
+"/var/jenkins_home/workspace/shortener-ci/infra/nginx/nginx.conf" to rootfs at
+"/etc/nginx/conf.d/default.conf": mount src=..., dst=/etc/nginx/conf.d/default.conf,
+flags=MS_BIND|MS_REC: not a directory: Are you trying to mount a directory onto a file
+(or vice-versa)? Check if the specified host path exists and is the expected type
+```
+
+Путь из `volumes:` резолвит демон, а не клиент. Демон этот — хостовый (сокет примонтирован в
+контейнер Jenkins), и `/var/jenkins_home/...` для него не путь из файловой системы демона: это
+точка монтирования внутри контейнера. Демон не нашёл источник и создал на его месте каталог,
+отсюда «mount a directory onto a file». Клиент `docker compose` внутри job'а файл видел —
+поэтому ошибка и выглядела как «файл есть, но смонтировать не выходит».
+
+Решение — оверлей `infra/docker-compose.ci.yml`: `volumes: !reset []` затирает список
+монтирований целиком (без `!reset` compose дописал бы его к базовому файлу, и ошибка осталась
+бы), а `image:` и `build:` переводят `gateway` на `shortener-gateway:${APP_IMAGE_TAG}`,
+который собирается из `infra/nginx/Dockerfile` — конфигурация запечена внутрь образа. Контекст
+сборки так не ломается: его клиент `docker compose` читает сам и передаёт демону потоком.
+
+Разработческий стек (базовый файл) монтирование сохраняет: править `nginx.conf` там можно без
+пересборки образа, а `docker compose up` запускается из репозитория на хосте, где путь
+однозначно разрешим.
 
 ### Почему всё через `host.docker.internal`
 
