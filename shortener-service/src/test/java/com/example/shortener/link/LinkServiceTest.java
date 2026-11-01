@@ -62,7 +62,10 @@ class LinkServiceTest {
 
     @BeforeEach
     void createService() {
-        service = new LinkService(links, clicks, cache, clickEvents, "http://localhost:8080", "test-salt");
+        // IpHasher здесь настоящий: тест проверяет, что в событие клика уходит 64-символьный
+        // хэш, а не mock, который бы эту проверку обходил.
+        service = new LinkService(links, clicks, cache, clickEvents, "http://localhost:8080",
+                new IpHasher("test-salt"));
     }
 
     @Test

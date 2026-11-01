@@ -39,9 +39,10 @@ def line_coverage(target):
 
 
 def color(percent):
-    if percent >= 80:
-        return "yellowgreen"
-    return "orange" if percent >= 60 else "red"
+    # пороги зеркалят гейт JaCoCo: 100% по строкам — единственное «зелёное» состояние
+    if percent >= 100:
+        return "green"
+    return "yellowgreen" if percent >= 80 else "orange" if percent >= 60 else "red"
 
 
 def main():

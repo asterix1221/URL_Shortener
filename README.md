@@ -94,11 +94,18 @@ docs/                 отчёты по тестам и нагрузочным �
 |---|---|
 | Юнит + интеграционные (Testcontainers) | `cd shortener-service; .\mvnw.cmd clean verify` |
 | Только юнит-тесты | `cd shortener-service; .\mvnw.cmd test` |
-| Покрытие (правило ≥ 80% по строкам) | `start target\site\jacoco\index.html` после `clean verify` |
+| Покрытие (гейт JaCoCo: 100% строк) | `start target\site\jacoco\index.html` после `clean verify` |
 | API-автотесты (нужен поднятый стек) | `cd shortener-autotests; .\mvnw.cmd test "-DbaseUrl=http://localhost:8080"` |
 | Only smoke / only regression | добавить `"-Dgroups=smoke"` или `"-Dgroups=regression"` |
 | Allure-отчёт | `.\mvnw.cmd allure:serve` |
 | Нагрузка | `.\scripts\run-load.ps1 -Sim RedirectSimulation -Profile constant -Rps 50 -Duration 120` |
+
+Гейт покрытия жёсткий: в `shortener-service/pom.xml` правило `BUNDLE / LINE COVEREDRATIO >= 1.00`,
+то есть `clean verify` падает, если хоть одна измеряемая строка осталась без теста. Из замера
+исключены классы без логики — `**/*Application*`, `**/config/**`, `**/dto/**`, `**/entity/**`;
+в отчёте 30 классов и 368 строк. Ветки (BRANCH) в гейт не входят и остаются отчётными: 83 из 90,
+непокрытые — частично выполненные условия в `LinkCache` (3), `LinkService` (2), `UrlValidator` (1)
+и `ApiExceptionHandler` (1).
 
 Юнит и интеграционные тесты видны так же, как автотесты: workflow `service-tests` гоняет
 `mvn verify`, пишет сводку (тесты по наборам, проваленные, покрытие) прямо на страницу сборки,

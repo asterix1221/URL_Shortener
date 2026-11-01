@@ -13,12 +13,8 @@ import com.example.shortener.common.NotFoundException;
 import com.example.shortener.link.dto.CreateLinkRequest;
 import com.example.shortener.link.dto.LinkResponse;
 import com.example.shortener.link.dto.LinkStatsResponse;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -39,18 +35,18 @@ public class LinkService {
     private final LinkCache cache;
     private final ClickEventPublisher clickEvents;
     private final String baseUrl;
-    private final String ipSalt;
+    private final IpHasher ipHasher;
 
     public LinkService(LinkRepository links, ClickEventRepository clicks, LinkCache cache,
                        ClickEventPublisher clickEvents,
                        @Value("${app.base-url}") String baseUrl,
-                       @Value("${app.ip-salt}") String ipSalt) {
+                       IpHasher ipHasher) {
         this.links = links;
         this.clicks = clicks;
         this.cache = cache;
         this.clickEvents = clickEvents;
         this.baseUrl = baseUrl;
-        this.ipSalt = ipSalt;
+        this.ipHasher = ipHasher;
     }
 
     @Transactional
@@ -110,7 +106,7 @@ public class LinkService {
     }
 
     private void publishClick(Long linkId, String ip, String userAgent, String referrer) {
-        clickEvents.publish(new ClickEventMessage(linkId, Instant.now(), hashIp(ip), userAgent, referrer));
+        clickEvents.publish(new ClickEventMessage(linkId, Instant.now(), ipHasher.hash(ip), userAgent, referrer));
     }
 
     @Transactional(readOnly = true)
@@ -153,18 +149,6 @@ public class LinkService {
 
     private LocalDate toLocalDate(Object day) {
         return ((java.sql.Date) day).toLocalDate();
-    }
-
-    private String hashIp(String ip) {
-        if (ip == null || ip.isBlank()) {
-            return null;
-        }
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest((ip + ipSalt).getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException ex) {
-            throw new IllegalStateException("SHA-256 is not available", ex);
-        }
     }
 
     private LinkResponse toResponse(Link link) {
