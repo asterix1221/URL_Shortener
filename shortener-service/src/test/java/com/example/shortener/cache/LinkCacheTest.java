@@ -20,10 +20,13 @@ import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -107,6 +110,28 @@ class LinkCacheTest {
         ArgumentCaptor<Duration> ttl = ArgumentCaptor.forClass(Duration.class);
         verify(values).set(eq("link:c1"), anyString(), ttl.capture());
         assertThat(ttl.getValue().getSeconds()).isBetween(28L, 30L);
+    }
+
+    @Test
+    void expiredLinkIsNotCached() {
+        // без заглушки вызов set() вернул бы null, и тест ловил бы не «не положили в кэш»,
+        // а случайное NPE в обёртке
+        doNothing().when(values).set(anyString(), anyString(), any(Duration.class));
+
+        // expiresAt в прошлом: ttlFor отдаёт 0 (Math.max с нулём), и класть в Redis нечего —
+        // такой ключ сразу стал бы мусором, а редирект по нему всё равно отвечает 410
+        cache.put(link("c1", true, Instant.now().minusSeconds(60), null));
+
+        verify(values, never()).set(anyString(), anyString(), any(Duration.class));
+    }
+
+    @Test
+    void putSurvivesRedisOutage() {
+        doThrow(new DataAccessResourceFailureException("redis down"))
+                .when(values).set(anyString(), anyString(), any(Duration.class));
+
+        // запись в кэш не должна ронять редирект: данные уже прочитаны из базы
+        assertThatCode(() -> cache.put(link("c1", true, null, null))).doesNotThrowAnyException();
     }
 
     @Test
