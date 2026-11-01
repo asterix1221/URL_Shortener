@@ -1,4 +1,4 @@
-# Jenkins для CI/CD этого проекта: образ с java 21, git, docker CLI + compose plugin и maven.
+# Jenkins для CI/CD этого проекта: образ с java 21, git, docker CLI + плагины compose/buildx и maven.
 # Никаких apt-репозиториев и «latest»: всё, что нужно пайплайну, копируется из официально
 # зафиксированных по версии образов.
 FROM jenkins/jenkins:2.580.2-lts-jdk21
@@ -27,4 +27,11 @@ ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
 RUN jenkins-plugin-cli --plugin-file /usr/share/jenkins/ref/plugins.txt \
         --war /usr/share/jenkins/jenkins.war
+
+# buildx — последним слоем, чтобы его добавление не сбрасывало кэш слоя с плагинами (иначе
+# пересборка образа заново качает 71 плагин). Без него `docker build` в job идёт legacy-сборщиком
+# и падает на RUN --mount=type=cache в shortener-service/Dockerfile:
+# «the --mount option requires BuildKit».
+COPY --from=docker:29.9.2-cli /usr/local/libexec/docker/cli-plugins/docker-buildx \
+     /usr/local/lib/docker/cli-plugins/docker-buildx
 
