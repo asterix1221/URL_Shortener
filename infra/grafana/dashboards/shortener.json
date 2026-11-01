@@ -24,7 +24,7 @@
     {
       "description": "Скорость редиректов по короткому коду (uri=/{code}) и 5xx-ответы.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 12,
         "x": 0,
         "y": 0
@@ -75,7 +75,7 @@
     {
       "description": "p50/p95/p99 времени редиректа по histogram_quantile от http_server_requests_seconds_bucket. Бакеты включены в application.yml (percentiles-histogram для http.server.requests).",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 12,
         "x": 12,
         "y": 0
@@ -151,10 +151,10 @@
     {
       "description": "Все 5xx сервиса, а не только редиректы: ответ приложения и ответ gateway считаются раздельно, здесь видно приложение.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 0,
-        "y": 8
+        "y": 9
       },
       "id": 3,
       "options": {
@@ -205,10 +205,10 @@
     {
       "description": "POST /api/links — создание ссылки (под нагрузкой CreateSimulation и MixedSimulation).",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 8,
-        "y": 8
+        "y": 9
       },
       "id": 4,
       "options": {
@@ -270,10 +270,10 @@
     {
       "description": "Доля попаданий в Redis-кэш редиректа: shortener.cache.requests с тегом result=hit|miss|error.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 16,
-        "y": 8
+        "y": 9
       },
       "id": 5,
       "options": {
@@ -326,10 +326,10 @@
     {
       "description": "Использование кучи по пулам (jvm_memory_used_bytes) и лимит кучи.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 0,
-        "y": 16
+        "y": 18
       },
       "id": 6,
       "options": {
@@ -391,10 +391,10 @@
     {
       "description": "Паузы сборщика мусора (суммарно секунд в секунду) и число пауз.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 8,
-        "y": 16
+        "y": 18
       },
       "id": 7,
       "options": {
@@ -456,10 +456,10 @@
     {
       "description": "Активные соединения и ожидающие выдачи из пула HikariCP. pending > 0 значит, что запросы ждут соединение, — это потолок пула.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 8,
         "x": 16,
-        "y": 16
+        "y": 18
       },
       "id": 8,
       "options": {
@@ -532,10 +532,10 @@
     {
       "description": "Отставание консьюмера click-events (kafka_consumer_fetch_manager_records_lag_max). Рост lag = клики пишутся в базу медленнее, чем приходят.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 12,
         "x": 0,
-        "y": 24
+        "y": 27
       },
       "id": 9,
       "options": {
@@ -597,10 +597,10 @@
     {
       "description": "Доля CPU процесса (0..1) и открытые файловые дескрипторы. Контейнер app ограничен cpus=2 в compose, поэтому process_cpu_usage=1 означает ~половину лимита.",
       "gridPos": {
-        "h": 8,
+        "h": 9,
         "w": 12,
         "x": 12,
-        "y": 24
+        "y": 27
       },
       "id": 10,
       "options": {
