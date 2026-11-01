@@ -92,6 +92,13 @@ services:
     profiles: ["ci"]
     build: ./jenkins
     image: shortener-jenkins:local
+    # Сокет демона смонтирован как root:root 660, а Jenkins внутри работает под uid 1000.
+    # group_add даёт этому процессу группу root, и docker CLI получает доступ к сокету —
+    # без перевода всего контейнера в root (иначе JENKINS_HOME и артефакты сборок
+    # принадлежали бы root, а не пользователю, под которым живут job).
+    user: jenkins
+    group_add:
+      - "root"
     ports:
       # Только на loopback: Jenkins без внешнего доступа, иначе незащищённый UI торчит на всю сеть.
       - "127.0.0.1:${JENKINS_PORT:-18088}:8080"
