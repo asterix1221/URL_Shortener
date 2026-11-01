@@ -13,6 +13,13 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Регистрация и вход — единственные операции с учётными данными в сервисе. Пароль в
+ * открытом виде не хранится и не читается: в базе лежит только хэш от
+ * {@link PasswordEncoder}, поэтому смена пароля здесь не предусмотрена. Методы работают с
+ * {@link UserRepository} напрямую и не управляют выданными токенами — отзыв отсутствует,
+ * проверка JWT идёт только по подписи и сроку, без обращения к базе.
+ */
 @Service
 public class AuthService {
 
@@ -26,6 +33,18 @@ public class AuthService {
         this.tokens = tokens;
     }
 
+    /**
+     * Создаёт пользователя в одной транзакции. Email сначала обрезается по краям и только
+     * потом ищется без учёта регистра, поэтому {@code Nina@Example.com} и
+     * {@code nina@example.com} — один и тот же занятый адрес. Пароль не нормализуется:
+     * пробелы по краям остаются частью пароля. Метка времени создания берётся из системных
+     * часов, ограничений на длину полей метод не проверяет.
+     *
+     * @param request email и пароль; при {@code null} email возникает
+     *                {@code NullPointerException} в {@code trim()}, валидацию выполняет
+     *                вызывающий слой
+     * @throws ConflictException если пользователь с таким email уже есть в базе
+     */
     @Transactional
     public void register(RegisterRequest request) {
         String email = request.email().trim();
@@ -35,6 +54,16 @@ public class AuthService {
         users.save(new User(email, passwordEncoder.encode(request.password()), Instant.now()));
     }
 
+    /**
+     * Проверяет учётные данные и выпускает новый токен. Неизвестный email и неверный
+     * пароль дают одно и то же исключение с одинаковым сообщением, чтобы ответ не
+     * подсказывал, какая именно часть не совпала. Email сравнивается без учёта регистра
+     * после обрезки пробелов; транзакция только для чтения, новых записей метод не создаёт.
+     *
+     * @param request email и пароль из формы входа; валидацию аннотациями метод не делает
+     * @return тело ответа входа: строка JWT и срок его жизни в секундах из конфигурации
+     * @throws InvalidCredentialsException если пользователя нет или пароль не совпал
+     */
     @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest request) {
         User user = users.findByEmailIgnoreCase(request.email().trim())

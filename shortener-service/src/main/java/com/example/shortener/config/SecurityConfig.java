@@ -26,22 +26,63 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import com.example.shortener.common.SecurityErrorWriter;
 
+/**
+ * Включает Spring Security ({@code @EnableWebSecurity}) и описывает цепочку
+ * фильтров HTTP, а также криптографические бины для JWT и паролей.
+ *
+ * <p>Открыты без токена: GET /{code} (публичный редирект по короткому коду),
+ * {@code /api/auth/**}, {@code /actuator/health}, {@code /actuator/prometheus},
+ * {@code /swagger-ui/**} и {@code /v3/api-docs/**}. Требует аутентификации только
+ * {@code /api/**}; всё остальное снова разрешено анонимно
+ * ({@code anyRequest().permitAll()}). CSRF выключен, сессии не создаются
+ * ({@code STATELESS}), токен передаётся как Bearer.
+ *
+ * <p>Отказ фильтрации отдаёт не страницу Spring, а JSON {@code ApiError}: один и тот
+ * же {@link SecurityErrorWriter} подключён как {@code authenticationEntryPoint}
+ * ресурс-сервера (иначе на испорченный JWT отвечал бы пустой 401), как точка входа
+ * {@code exceptionHandling} и как {@code accessDeniedHandler}.
+ *
+ * <p>Подпись токенов — HMAC-SHA256. Секрет читается из {@code app.jwt.secret}
+ * (свойства регистрируются {@code @EnableConfigurationProperties} для
+ * {@link JwtProperties}; пустой или короче 32 байт секрет валит старт приложения),
+ * {@code app.jwt.ttl-seconds} этим классом не используется.
+ */
 @Configuration
 @EnableWebSecurity
 @EnableConfigurationProperties(JwtProperties.class)
 public class SecurityConfig {
 
+    /**
+     * Используется при регистрации и входе: пароли хранятся как BCrypt-хэши, поэтому
+     * проверка сравнивает пароль с хэшем через {@code matches}.
+     *
+     * @return новый {@code BCryptPasswordEncoder}
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * Общий секрет для подписи и проверки JWT, байты строки {@code app.jwt.secret}
+     * в UTF-8 без дополнительного хеширования.
+     *
+     * @param properties настроенные значения {@code app.jwt.*}
+     * @return ключ для алгоритма {@code HmacSHA256}
+     */
     @Bean
     public SecretKey jwtSecretKey(JwtProperties properties) {
         byte[] secret = properties.secret().getBytes(StandardCharsets.UTF_8);
         return new SecretKeySpec(secret, "HmacSHA256");
     }
 
+    /**
+     * Энкодер для выдачи токенов: тот же секрет, но оформленный как JWK с kid
+     * {@code "shortener-hs256"} и алгоритмом HS256.
+     *
+     * @param secretKey бин {@link #jwtSecretKey(JwtProperties)}
+     * @return {@code NimbusJwtEncoder} на неизменяемом наборе из одного ключа
+     */
     @Bean
     public JwtEncoder jwtEncoder(SecretKey secretKey) {
         OctetSequenceKey jwk = new OctetSequenceKey.Builder(secretKey)
@@ -52,11 +93,31 @@ public class SecurityConfig {
         return new NimbusJwtEncoder(jwkSource);
     }
 
+    /**
+     * Дешифратор для ресурс-сервера: принимает только подпись HS256 тем же секретом,
+     * что выдал {@link #jwtEncoder(SecretKey)}.
+     *
+     * @param secretKey бин {@link #jwtSecretKey(JwtProperties)}
+     * @return {@code NimbusJwtDecoder} на симметричном ключе
+     */
     @Bean
     public JwtDecoder jwtDecoder(SecretKey secretKey) {
         return NimbusJwtDecoder.withSecretKey(secretKey).macAlgorithm(MacAlgorithm.HS256).build();
     }
 
+    /**
+     * Цепочка фильтров: Stateless + Bearer-JWT вместо cookie-сессий. Ролей и
+     * authority здесь нет — {@code /api/**} доступен любому, чей токен прошёл
+     * проверку, а принадлежность ресурса пользователю контролирует сервисный слой.
+     * Матчеры применяются в порядке объявления, поэтому публичный редирект
+     * GET /{code} стоит первым.
+     *
+     * @param http        строитель цепочки от Spring Security
+     * @param jwtDecoder  бин {@link #jwtDecoder(SecretKey)} для ресурс-сервера
+     * @param errorWriter единый JSON-ответ 401/403 вместо страниц Spring
+     * @return собранная {@code SecurityFilterChain}
+     * @throws Exception если конфигурация фильтров не применима
+     */
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtDecoder jwtDecoder,
                                            SecurityErrorWriter errorWriter) throws Exception {

@@ -21,6 +21,7 @@
     <springdoc.version>2.8.6</springdoc.version>
     <jacoco.version>0.8.13</jacoco.version>
     <bucket4j.version>8.21.0</bucket4j.version>
+    <javadoc.version>3.12.0</javadoc.version>
   </properties>
 
   <dependencies>
@@ -197,6 +198,24 @@
             </configuration>
           </execution>
         </executions>
+      </plugin>
+      <!--
+        Документация генерируется по запросу (./mvnw javadoc:javadoc), а не на каждой сборке:
+        CI от неё не зависит, а версия закреплена здесь, чтобы результат не менялся вместе
+        с релизом плагина. doclint без группы missing — тривиальные делегаты (getter'ы
+        рекордов, конструкторы DI) останутся без @param/@return, и это осознанно.
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>${javadoc.version}</version>
+        <configuration>
+          <encoding>UTF-8</encoding>
+          <docencoding>UTF-8</docencoding>
+          <charset>UTF-8</charset>
+          <doclint>all,-missing</doclint>
+          <windowtitle>URL shortener API</windowtitle>
+        </configuration>
       </plugin>
     </plugins>
   </build>
