@@ -13,7 +13,7 @@ API-автотесты (REST Assured + Allure) и нагрузочные сце�
 Нужны Docker Desktop, Java 21+ и PowerShell 7.
 
 ```powershell
-# 1. поднять стек: Postgres + Redis + Kafka + приложение
+# 1. поднять стек: gateway nginx + Postgres + Redis + Kafka + приложение
 Copy-Item infra\.env.example infra\.env
 docker compose -f infra\docker-compose.yml --env-file infra\.env up -d --build
 
@@ -30,15 +30,16 @@ Invoke-RestMethod -Method Post http://localhost:8080/api/links -Headers @{ Autho
 
 Полный сценарий «регистрация → логин → ссылка → переходы → статистика»: `.\scripts\smoke.ps1`.
 
-Если порт 8080 на машине занят (например Jenkins), контейнерное приложение поднимается на
-`APP_PORT` из `infra/.env` (здесь `28080`); локальный запуск — так же:
+Если порт 8080 на машине занят (например Jenkins), наружу поднимается gateway на `APP_PORT` из
+`infra/.env` (здесь `28080`); локальный запуск сервиса — так же:
 `$env:SERVER_PORT = "28080"; $env:APP_BASE_URL = "http://localhost:28080"`, а автотесты и
 нагрузку указывай этим же адресом (`-DbaseUrl=...`, `BASE_URL`).
 
 ## Структура
 
 ```
-infra/                docker-compose (Postgres, Redis, Kafka, Prometheus, Grafana, приложение)
+infra/                docker-compose (gateway nginx, Postgres, Redis, Kafka, Prometheus, Grafana,
+                      приложение) + nginx/nginx.conf
 shortener-service/    Spring Boot сервис
 shortener-autotests/  REST Assured автотесты + Allure
 shortener-loadtests/  Gatling-симуляции
@@ -65,8 +66,27 @@ docs/                 отчёты по тестам и нагрузочным �
 - **Метрики** — `/actuator/prometheus`: `http_server_requests_seconds_bucket` (гистограмма
   percentiles), `shortener_cache_requests_total`, `shortener_clicks_publish_errors_total`,
   `hikaricp_*`, `jvm_*`, лаг консьюмера `kafka_consumer_fetch_manager_records_lag_max`.
-  Этот эндпоинт открыт без токена — сознательное упрощение учебного проекта; в проде его
-  нужно закрыть или вынести на отдельный порт.
+  Эндпоинт открыт без токена на самом сервисе — сознательное упрощение учебного проекта; наружу
+  его закрывает gateway (см. ниже), а Prometheus ходит к `app:8080` внутри сети.
+
+## Gateway (nginx)
+
+`infra/nginx/nginx.conf` монтируется в контейнер `gateway` (образ `nginx:1.30.6`), он слушает
+`80` внутри сети compose и публикуется как `APP_PORT:80`. Порт самого приложения наружу больше
+не проброшен — gateway единственная точка входа. Postgres/Redis/Kafka публикуют порты отдельно:
+это нужно для `mvnw spring-boot:run` с хоста и для Testcontainers-тестов.
+
+- `X-Forwarded-For/Proto/Port` + `Host: $http_host`, на стороне сервиса
+  `server.forward-headers-strategy: native`. Без проброса адресов все клики в статистику
+  писались бы с одним внутренним IP прокси; без `X-Forwarded-Port` Tomcat при
+  `X-Forwarded-Proto` подставляет порт схемы по умолчанию, и OpenAPI/Swagger теряют `:APP_PORT`
+  в адресе «Try it out» (порт nginx берёт из заголовка Host через `map`).
+- `/actuator/prometheus` наружу закрыт (`deny all` → 403): Prometheus скоупит `app:8080`
+  напрямую внутри сети compose. `/actuator/health` открыт — им пользуются CI и healthcheck.
+- `GET /gateway-health` отвечает `ok` без похода в приложение — это healthcheck контейнера.
+- `client_max_body_size 16k`: большее тело — 413 ещё до сервиса; `proxy_read_timeout` 10 s.
+- Прокинутые статусы не подменяются (`proxy_intercept_errors off`), поэтому `302`, `410 Gone`
+  и `429` с `Retry-After` доходят клиенту как есть.
 
 ## Тесты
 
@@ -95,7 +115,9 @@ docs/                 отчёты по тестам и нагрузочным �
 ## Ссылки
 
 - Swagger UI: `http://localhost:8080/swagger-ui/index.html` (Authorize — JWT из `/api/auth/login`)
-- Метрики: `http://localhost:8080/actuator/prometheus`
+  — адрес через gateway, в `APP_PORT` из `infra/.env`
+- Метрики: снаружи gateway закрывает `/actuator/prometheus` (403); Prometheus скоупит
+  `http://app:8080/actuator/prometheus` внутри сети compose
 - Grafana: `http://localhost:3000` (admin / `GRAFANA_PASSWORD` из `infra/.env`)
 
 Решения, компромиссы и результаты нагрузочных тестов описаны далее в README; отчёты по

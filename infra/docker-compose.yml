@@ -52,13 +52,31 @@ services:
       DB_USER: ${POSTGRES_USER}
       DB_PASSWORD: ${POSTGRES_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
+      IP_SALT: ${IP_SALT:-change_me_ip_salt}
       APP_BASE_URL: http://localhost:${APP_PORT}
       REDIS_HOST: redis
       KAFKA_BOOTSTRAP: kafka:19092
       APP_CLICKS_CONSUMER_ENABLED: ${APP_CLICKS_CONSUMER_ENABLED:-true}
       RATE_LIMIT_CREATE_PER_MINUTE: ${RATE_LIMIT_CREATE_PER_MINUTE:-10}
+    # Наружу порт приложения не публикуется: единственная точка входа — gateway. Изнутри сети
+    # app доступен по app:8080 (Prometheus и healthcheck CI ходят туда же).
+    expose:
+      - "8080"
+
+  gateway:
+    image: nginx:1.30.6
+    depends_on:
+      app:
+        condition: service_started
     ports:
-      - "${APP_PORT}:8080"
+      - "${APP_PORT}:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1/gateway-health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
   pgdata:
