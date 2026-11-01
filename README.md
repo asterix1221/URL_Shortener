@@ -8,7 +8,7 @@
 лимиты и TTL ссылок, кэш Redis, асинхронная запись кликов в Kafka, Prometheus/Grafana,
 API-автотесты (REST Assured + Allure) и нагрузочные сценарии (Gatling).
 
-## Быстрый старт (3 команды)
+## Быстрый старт (три шага)
 
 Нужны Docker Desktop, Java 21+ и PowerShell 7.
 
@@ -21,12 +21,26 @@ docker compose -f infra\docker-compose.yml --env-file infra\.env up -d --build
 $env:JWT_SECRET = "dev-secret-dev-secret-dev-secret-123456"
 cd shortener-service; .\mvnw.cmd spring-boot:run
 
-# 3. создать ссылку
+# 3. зарегистрироваться, войти и создать ссылку
+#    (аккаунта в чистой базе нет — миграции создают только схемы; адрес с Get-Random,
+#     чтобы шаг можно было повторить на стенде, где данные уже остались)
+$cred = @{ email = "demo$(Get-Random)@example.com"; password = "Passw0rd!" } | ConvertTo-Json
+Invoke-RestMethod -Method Post http://localhost:8080/api/auth/register -ContentType 'application/json' `
+  -Body $cred | Out-Null
 $token = (Invoke-RestMethod -Method Post http://localhost:8080/api/auth/login -ContentType 'application/json' `
-  -Body (@{ email = "demo@example.com"; password = "Passw0rd!" } | ConvertTo-Json)).accessToken
+  -Body $cred).accessToken
 Invoke-RestMethod -Method Post http://localhost:8080/api/links -Headers @{ Authorization = "Bearer $token" } `
   -ContentType 'application/json' -Body (@{ url = "https://example.com/very/long/path" } | ConvertTo-Json)
 ```
+
+Приложение стартует несколько десятков секунд после `up` (в проверке на чистой базе — 26 с от
+запуска контейнера до ответа): в это время gateway отвечает 502, а `POST /api/links` — ошибкой
+соединения. Ориентир готовности — `http://localhost:8080/actuator/health` отдаёт
+`{"status":"UP"}`.
+
+Имя compose-проекта берётся из каталога файла (`infra`), поэтому второй клон репозитория на той
+же машине поднимет стек в том же проекте и пересоздаст контейнеры первого; том `infra_pgdata`
+при этом общий. Для параллельного стенда задавай проект явно: `docker compose -p other ...`.
 
 Полный сценарий «регистрация → логин → ссылка → переходы → статистика»: `.\scripts\smoke.ps1`.
 
