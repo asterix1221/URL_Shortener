@@ -207,3 +207,13 @@ Testcontainers; `TESTCONTAINERS_HOST_OVERRIDE` нужен тем же интег
 737 архивированных артефактов. Плагин в сборке не участвует — execution не привязан к фазе,
 и `mvn verify` его не вызывает; генерация документации отдельной командой описана в README
 (раздел «Документация кода (Javadoc)»), выход — `shortener-service/target/reports/apidocs`.
+
+После этапа 6 (Prometheus/Grafana в compose, модуль `shortener-loadtests`, `scripts/run-load.ps1`)
+`main` перепроверен сборкой №5 на коммите мержа `7461d76`: `SUCCESS` за 127 711 мс,
+`Tests run: 99` / `Tests run: 19` / `All coverage checks have been met.` / `Tests run: 38`
+в автотестах, `Finished: SUCCESS`. Мониторинг в сборке не участвовал: `docker compose up`
+поднял ровно пять контейнеров — `shortener-ci-{app,gateway,kafka,postgres,redis}-1`, — потому
+что `prometheus` и `grafana` закрыты `profiles: ["monitoring"]`, а пайплайн и
+`.github/workflows/autotests.yml` вызывают `up` без профилей. Тот же коммит зелёный и в
+GitHub Actions: run `41324333179` (workflow `autotests`, заголовок страницы ссылается на
+`7461d76`), бейдж workflow — `passing`.
