@@ -137,7 +137,9 @@ docker compose -f infra\docker-compose.yml --env-file infra\.env --profile ci up
 ```
 
 Прогон `shortener-ci`: `mvn verify` (юнит + интеграционные + JaCoCo) → `docker build` под
-тегом `shortener-service:ci-<номер>` → тот же тег встаёт в CI-стек `shortener-ci` на портах
+тегом `shortener-service:ci-<номер>` и образ gateway с запечённым `nginx.conf` (в CI-стеке
+конфигурация не монтируется из репозитория: хостовый демон, к которому job обращается через
+сокет, не видит workspace сборки) → те же теги встают в CI-стек `shortener-ci` на портах
 28180/5442/6389/29092 (не пересекаются с рабочей копией) → ожидание `/actuator/health` →
 API-автотесты через gateway → Allure в артефакты → `down -v` в `post: always`. Секреты
 стенда генерируются `openssl rand` на время сборки и в репозиторий не попадают.

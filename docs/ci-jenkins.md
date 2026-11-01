@@ -158,4 +158,44 @@ Testcontainers; `TESTCONTAINERS_HOST_OVERRIDE` нужен тем же интег
 
 ## Прогон
 
-Заполняется по факту сборки — здесь живут реальные вывод и номер сборки.
+Сборка №3 job'а `shortener-ci` — ветка `ci/gateway-image-for-dood` (коммит `18f0593`),
+результат `SUCCESS`, длительность 120 905 мс. Стадии по `wfapi/describe`:
+
+| Стадия | Статус | Время |
+|---|---|---|
+| Declarative: Checkout SCM | SUCCESS | 959 ms |
+| Сервис: сборка и тесты | SUCCESS | 48 457 ms |
+| Образ приложения | SUCCESS | 14 776 ms |
+| Стек: поднимается | SUCCESS | 6 796 ms |
+| Стек: готов | SUCCESS | 13 713 ms |
+| API-автотесты | SUCCESS | 26 206 ms |
+| Declarative: Post Actions | SUCCESS | 7 547 ms |
+
+Что видно в консоли (`/job/shortener-ci/3/consoleText`):
+
+* тесты сервиса — `Tests run: 99, Failures: 0, Errors: 0, Skipped: 0` (surefire) и
+  `Tests run: 19, Failures: 0, Errors: 0, Skipped: 0` (failsafe на Testcontainers);
+* гейт покрытия — `All coverage checks have been met.` и описание сборки
+  `Покрытие строк (JaCoCo): 100.0%`;
+* образы — `size=648742613 bytes` для `shortener-service:ci-3`, `Image
+  shortener-gateway:ci-3 Built` → `size=239512484 bytes`;
+* стек — `Container shortener-ci-gateway-1 Started` без ошибки монтирования, и
+  `docker compose ... images app gateway` печатает обе строки с тегом `ci-3`
+  (649MB / 240MB), то есть в стеке ровно артефакты этой сборки;
+* готовность — `{"status":"UP"}` из `curl -sf http://host.docker.internal:28180/actuator/health`
+  на 7-й попытке (6 пауз по 2 с, стадия 13,7 с);
+* автотесты — `mvn -B test -DbaseUrl=http://host.docker.internal:28180` →
+  `Tests run: 38, Failures: 0, Errors: 0, Skipped: 0` и `BUILD SUCCESS`: все проверки идут через
+  gateway nginx, как и ручная проверка;
+* `post` — `down -v`, затем `Untagged: shortener-service:ci-3` и
+  `Untagged: shortener-gateway:ci-3`, и «CI-стек удалён; артефакты сборки — Allure, JaCoCo,
+  протоколы тестов».
+
+Артефакты сборки №3 (`api/json?depth=1`): 586 файлов, среди них `allure-maven.html` (отчёт
+автотестов) и `jacoco.xml` / `jacoco.csv` / `jacoco-sessions.html` (отчёт покрытия); протоколы
+тестов отдельным артефактом не лежат — их показывает вкладка Test Result (шаг `junit`).
+
+История падений до зелёного прогона: сборка №1 споткнулась на «Образ приложения»
+(`the --mount option requires BuildKit`) — помог `docker-buildx` в образ Jenkins; сборка №2 —
+на «Стек: поднимается» из-за bind-монтирования (см. раздел выше). Обе починки видны в
+`git log` по коммитам `3756983` и `18f0593`.
