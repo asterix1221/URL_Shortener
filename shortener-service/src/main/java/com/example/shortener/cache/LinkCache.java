@@ -15,6 +15,11 @@ import org.springframework.stereotype.Component;
 /**
  * Cache-aside для редиректа. Ключ {@code link:<code>} хранит оригинальный URL,
  * {@code link-id:<code>} — id ссылки, нужный для события клика без похода в БД.
+ *
+ * <p>Свойство {@code app.cache.enabled} ({@code APP_CACHE_ENABLED}, по умолчанию {@code true})
+ * выключает кэш: {@link #find} тогда всегда возвращает {@code null}, {@link #put} и
+ * {@link #evict} ничего не делают. Выключенный кэш не участвует и в метрике
+ * {@code shortener.cache.requests} — счётчик отражает только реальные обращения к Redis.
  */
 @Component
 public class LinkCache {
@@ -26,12 +31,15 @@ public class LinkCache {
     private final StringRedisTemplate redis;
     private final MeterRegistry metrics;
     private final long ttlSeconds;
+    private final boolean enabled;
 
     public LinkCache(StringRedisTemplate redis, MeterRegistry metrics,
-                     @Value("${app.cache.ttl-seconds}") long ttlSeconds) {
+                     @Value("${app.cache.ttl-seconds}") long ttlSeconds,
+                     @Value("${app.cache.enabled:true}") boolean enabled) {
         this.redis = redis;
         this.metrics = metrics;
         this.ttlSeconds = ttlSeconds;
+        this.enabled = enabled;
     }
 
     /**
@@ -45,9 +53,10 @@ public class LinkCache {
      * Читает оба ключа кода — {@code link:<code>} и {@code link-id:<code>} — одной операцией
      * {@code MGET}.
      *
-     * <p>Возвращает {@code null} в двух случаях: кэш промахнулся (Redis вернул пустой ответ либо
-     * хоть один из двух ключей отсутствует) и Redis недоступен ({@code DataAccessException}
-     * пишется в лог как предупреждение). Второй случай отличается только метрикой, поэтому
+     * <p>Возвращает {@code null} в трёх случаях: кэш выключен ({@code app.cache.enabled=false},
+     * Redis при этом не трогается и счётчик не двигается), кэш промахнулся (Redis вернул пустой
+     * ответ либо хоть один из двух ключей отсутствует) и Redis недоступен
+     * ({@code DataAccessException} пишется в лог как предупреждение). Второй случай отличается только метрикой, поэтому
      * вызывающий код обязан при {@code null} идти в базу и не может считать ссылку отсутствующей.
      *
      * <p>Счётчик {@code shortener.cache.requests} с тегом {@code result} получает {@code hit},
@@ -57,6 +66,9 @@ public class LinkCache {
      * @return {@link Cached} при полностью заполненном кэше, иначе {@code null}
      */
     public Cached find(String code) {
+        if (!enabled) {
+            return null;
+        }
         List<String> values;
         try {
             values = redis.opsForValue().multiGet(List.of(URL_KEY + code, ID_KEY + code));
@@ -77,8 +89,9 @@ public class LinkCache {
      * Прогревает кэш по уже прочитанной из базы ссылке: оба ключа кода записываются с одинаковым
      * TTL.
      *
-     * <p>Запись пропускается, если у ссылки задан {@code maxClicks} (её доступность зависит от
-     * счётчика в базе) либо она не активна, и если полученный TTL не положительный. Иначе TTL
+     * <p>Запись пропускается, если кэш выключен, если у ссылки задан {@code maxClicks} (её
+     * доступность зависит от счётчика в базе) либо она не активна, и если полученный TTL не
+     * положительный. Иначе TTL
      * считается как {@code min(app.cache.ttl-seconds, секунд до expiresAt)}: время до истечения
      * не берётся отрицательным, а ссылка без {@code expiresAt} получает конфигурационный TTL.
      *
@@ -90,7 +103,7 @@ public class LinkCache {
      *             игнорируются без ошибки
      */
     public void put(Link link) {
-        if (link.getMaxClicks() != null || !link.isActive()) {
+        if (!enabled || link.getMaxClicks() != null || !link.isActive()) {
             return;
         }
         Duration ttl = ttlFor(link);
@@ -109,13 +122,17 @@ public class LinkCache {
      * Удаляет оба ключа кода одной операцией, чтобы после деактивации ссылки редирект больше не
      * обслуживался из кэша.
      *
-     * <p>Ответ Redis (сколько ключей удалено) не проверяется, счётчики не обновляются. При
+     * <p>При выключенном кэше метод ничего не удаляет. Ответ Redis (сколько ключей удалено) не
+     * проверяется, счётчики не обновляются. При
      * {@code DataAccessException} ошибка только логируется: удаление не повторяется, и до
      * истечения TTL кэш может отдавать устаревший адрес.
      *
      * @param code короткий код ссылки
      */
     public void evict(String code) {
+        if (!enabled) {
+            return;
+        }
         try {
             redis.delete(List.of(URL_KEY + code, ID_KEY + code));
         } catch (DataAccessException ex) {

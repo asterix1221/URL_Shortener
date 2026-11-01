@@ -48,7 +48,7 @@ class LinkCacheTest {
     void createCache() {
         when(redis.opsForValue()).thenReturn(values);
         metrics = new SimpleMeterRegistry();
-        cache = new LinkCache(redis, metrics, 3600);
+        cache = new LinkCache(redis, metrics, 3600, true);
     }
 
     @Test
@@ -146,6 +146,24 @@ class LinkCacheTest {
         when(redis.delete(anyList())).thenThrow(new DataAccessResourceFailureException("redis down"));
 
         cache.evict("c1");
+    }
+
+    @Test
+    void disabledCacheTouchesNeitherRedisNorMetrics() {
+        LinkCache off = new LinkCache(redis, metrics, 3600, false);
+
+        // find обязан вести себя как полный промах, чтобы вызывающий код пошёл в базу
+        assertThat(off.find("c1")).isNull();
+        off.put(link("c1", true, null, null));
+        off.evict("c1");
+
+        verify(redis, never()).delete(anyList());
+        verify(values, never()).multiGet(anyList());
+        verify(values, never()).set(anyString(), anyString(), any(Duration.class));
+        // счётчик тратится только на реальные обращения к Redis
+        assertThat(count("hit")).isZero();
+        assertThat(count("miss")).isZero();
+        assertThat(count("error")).isZero();
     }
 
     private double count(String result) {

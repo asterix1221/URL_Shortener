@@ -2,7 +2,7 @@ package com.example.shortener.link;
 
 import com.example.shortener.cache.LinkCache;
 import com.example.shortener.clicks.ClickEventMessage;
-import com.example.shortener.clicks.ClickEventPublisher;
+import com.example.shortener.clicks.ClickRecorder;
 import com.example.shortener.common.Base62;
 import com.example.shortener.common.BadRequestException;
 import com.example.shortener.common.ConflictException;
@@ -49,7 +49,7 @@ public class LinkService {
     private final LinkRepository links;
     private final ClickEventRepository clicks;
     private final LinkCache cache;
-    private final ClickEventPublisher clickEvents;
+    private final ClickRecorder clickEvents;
     private final String baseUrl;
     private final IpHasher ipHasher;
 
@@ -57,12 +57,13 @@ public class LinkService {
      * @param links       репозиторий ссылок; id берётся из последовательности {@code link_seq}
      * @param clicks      репозиторий событий кликов (нужен только для статистики)
      * @param cache       кэш адресов в Redis; редирект без него работал бы в один запрос больше
-     * @param clickEvents публикация события клика в Kafka
+     * @param clickEvents запись события клика — асинхронно в Kafka или сразу в базу, в
+     *                    зависимости от {@code app.clicks.mode}
      * @param baseUrl     значение {@code app.base-url}: из него собирается {@code shortUrl}
      * @param ipHasher    хешер адреса клиента (IP в базу не попадает)
      */
     public LinkService(LinkRepository links, ClickEventRepository clicks, LinkCache cache,
-                       ClickEventPublisher clickEvents,
+                       ClickRecorder clickEvents,
                        @Value("${app.base-url}") String baseUrl,
                        IpHasher ipHasher) {
         this.links = links;
@@ -131,11 +132,15 @@ public class LinkService {
      * {@code UPDATE} — ноль строк означает «лимит исчерпан прямо сейчас».
      *
      * <p>Ссылки с {@code maxClicks} в кэш не кладутся (см. {@code LinkCache.put}), поэтому их
-     * доступность всегда проверяется по свежему счётчику в базе.
+     * доступность всегда проверяется по свежему счётчику в базе. При
+     * {@code app.cache.enabled=false} ({@code APP_CACHE_ENABLED=false}) кэш не читается и не
+     * пополняется вовсе — каждый редирект идёт в базу.
      *
-     * <p>Событие клика публикуется в Kafka и не ждёт записи: адрес, user-agent и referrer
-     * сохраняются в {@code click_events} фоновым консьюмером, поэтому статистика
-     * «догоняет» редирект с задержкой в сотни миллисекунд.
+     * <p>Событие клика записывается через {@link ClickRecorder}: в режиме по умолчанию
+     * ({@code app.clicks.mode=async}) оно публикуется в Kafka и не ждёт записи — строку в
+     * {@code click_events} дописывает фоновый консьюмер, поэтому статистика «догоняет» редирект
+     * с задержкой в сотни миллисекунд. В {@code sync} та же строка пишется здесь же, в пути
+     * ответа.
      *
      * @param code      короткий код из пути
      * @param ip        адрес клиента из {@code HttpServletRequest}, в базу уходит только его хеш
@@ -149,7 +154,7 @@ public class LinkService {
     public String redirect(String code, String ip, String userAgent, String referrer) {
         LinkCache.Cached cached = cache.find(code);
         if (cached != null) {
-            publishClick(cached.linkId(), ip, userAgent, referrer);
+            recordClick(cached.linkId(), ip, userAgent, referrer);
             return cached.originalUrl();
         }
 
@@ -163,12 +168,12 @@ public class LinkService {
             throw new GoneException("link is not available: " + code);
         }
         cache.put(link);
-        publishClick(link.getId(), ip, userAgent, referrer);
+        recordClick(link.getId(), ip, userAgent, referrer);
         return link.getOriginalUrl();
     }
 
-    private void publishClick(Long linkId, String ip, String userAgent, String referrer) {
-        clickEvents.publish(new ClickEventMessage(linkId, Instant.now(), ipHasher.hash(ip), userAgent, referrer));
+    private void recordClick(Long linkId, String ip, String userAgent, String referrer) {
+        clickEvents.record(new ClickEventMessage(linkId, Instant.now(), ipHasher.hash(ip), userAgent, referrer));
     }
 
     /**
