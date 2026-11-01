@@ -92,19 +92,54 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
 1. `mvn -B verify` в `shortener-service` — surefire (юнит) + failsafe (интеграционные на
    Testcontainers) + JaCoCo; шаг `junit` публикует протоколы, `archiveArtifacts` — HTML
    отчёт покрытия.
-2. `docker build -t shortener-service:ci-<номер>` — этот тег попадает в compose (`image:
-   shortener-service:${APP_IMAGE_TAG}` у сервиса `app`), поэтому стек поднимает ровно тот
-   образ, который был собран и назван в пайплайне, а не копию `shortener-ci-app`.
-3. `docker compose up -d` в отдельном проекте `shortener-ci` и на своих хост-портах
-   (28180/5442/6389/29092), чтобы не пересекаться с рабочей копией стека. Секреты стенда
-   (`POSTGRES_PASSWORD`, `JWT_SECRET`, `IP_SALT`) генерируются `openssl rand` на одну
-   сборку и не хранятся в репозитории.
+2. `docker build -t shortener-service:ci-<номер>` и `docker compose build gateway` — теги
+   попадают в compose (`image: shortener-service:${APP_IMAGE_TAG}` у сервиса `app` и
+   `shortener-gateway:${APP_IMAGE_TAG}` в оверлее), поэтому стек поднимает ровно те образы,
+   которые были собраны и названы в этой сборке, а не копию `shortener-ci-app` или образ
+   с прошлой сборки.
+3. `docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml up -d` в
+   отдельном проекте `shortener-ci` и на своих хост-портах (28180/5442/6389/29092), чтобы не
+   пересекаться с рабочей копией стека. Секреты стенда (`POSTGRES_PASSWORD`, `JWT_SECRET`,
+   `IP_SALT`) генерируются `openssl rand` на одну сборку и не хранятся в репозитории.
 4. Ожидание `GET /actuator/health` через `host.docker.internal` (60 попыток по 2 с); при
    таймауте в лог сборки кладутся `compose ps` и `logs --tail=120 app gateway`.
 5. `mvn -B test -DbaseUrl=…` в `shortener-autotests` — автотесты идут через gateway nginx,
    то же самое зеркало, что и у ручной проверки.
 6. `post: always` — `allure:report` + архив отчёта, затем `docker compose down -v`: стек
-   сносится вместе с томами, следующий прогон начинается с чистой базы и миграций.
+   сносится вместе с томами, следующий прогон начинается с чистой базы и миграций; образы
+   `ci-<номер>` удаляются по именам (не `--rmi local`, иначе уехал бы и
+   `shortener-jenkins:local` с 71 плагином).
+
+### Bind-монтирования репозитория в DooD не работают
+
+Сборка №2 упала на этапе «Стек: поднимается» — стек стартовал, но контейнер `gateway` не
+создался (постфикс времени в логе Jenkins убран):
+
+```
+Error response from daemon: failed to create task for container: failed to create shim task:
+OCI runtime create failed: runc create failed: unable to start container process:
+error during container init: error mounting
+"/var/jenkins_home/workspace/shortener-ci/infra/nginx/nginx.conf" to rootfs at
+"/etc/nginx/conf.d/default.conf": mount src=..., dst=/etc/nginx/conf.d/default.conf,
+flags=MS_BIND|MS_REC: not a directory: Are you trying to mount a directory onto a file
+(or vice-versa)? Check if the specified host path exists and is the expected type
+```
+
+Путь из `volumes:` резолвит демон, а не клиент. Демон этот — хостовый (сокет примонтирован в
+контейнер Jenkins), и `/var/jenkins_home/...` для него не путь из файловой системы демона: это
+точка монтирования внутри контейнера. Демон не нашёл источник и создал на его месте каталог,
+отсюда «mount a directory onto a file». Клиент `docker compose` внутри job'а файл видел —
+поэтому ошибка и выглядела как «файл есть, но смонтировать не выходит».
+
+Решение — оверлей `infra/docker-compose.ci.yml`: `volumes: !reset []` затирает список
+монтирований целиком (без `!reset` compose дописал бы его к базовому файлу, и ошибка осталась
+бы), а `image:` и `build:` переводят `gateway` на `shortener-gateway:${APP_IMAGE_TAG}`,
+который собирается из `infra/nginx/Dockerfile` — конфигурация запечена внутрь образа. Контекст
+сборки так не ломается: его клиент `docker compose` читает сам и передаёт демону потоком.
+
+Разработческий стек (базовый файл) монтирование сохраняет: править `nginx.conf` там можно без
+пересборки образа, а `docker compose up` запускается из репозитория на хосте, где путь
+однозначно разрешим.
 
 ### Почему всё через `host.docker.internal`
 
@@ -123,4 +158,44 @@ Testcontainers; `TESTCONTAINERS_HOST_OVERRIDE` нужен тем же интег
 
 ## Прогон
 
-Заполняется по факту сборки — здесь живут реальные вывод и номер сборки.
+Сборка №3 job'а `shortener-ci` — ветка `ci/gateway-image-for-dood` (коммит `18f0593`),
+результат `SUCCESS`, длительность 120 905 мс. Стадии по `wfapi/describe`:
+
+| Стадия | Статус | Время |
+|---|---|---|
+| Declarative: Checkout SCM | SUCCESS | 959 ms |
+| Сервис: сборка и тесты | SUCCESS | 48 457 ms |
+| Образ приложения | SUCCESS | 14 776 ms |
+| Стек: поднимается | SUCCESS | 6 796 ms |
+| Стек: готов | SUCCESS | 13 713 ms |
+| API-автотесты | SUCCESS | 26 206 ms |
+| Declarative: Post Actions | SUCCESS | 7 547 ms |
+
+Что видно в консоли (`/job/shortener-ci/3/consoleText`):
+
+* тесты сервиса — `Tests run: 99, Failures: 0, Errors: 0, Skipped: 0` (surefire) и
+  `Tests run: 19, Failures: 0, Errors: 0, Skipped: 0` (failsafe на Testcontainers);
+* гейт покрытия — `All coverage checks have been met.` и описание сборки
+  `Покрытие строк (JaCoCo): 100.0%`;
+* образы — `size=648742613 bytes` для `shortener-service:ci-3`, `Image
+  shortener-gateway:ci-3 Built` → `size=239512484 bytes`;
+* стек — `Container shortener-ci-gateway-1 Started` без ошибки монтирования, и
+  `docker compose ... images app gateway` печатает обе строки с тегом `ci-3`
+  (649MB / 240MB), то есть в стеке ровно артефакты этой сборки;
+* готовность — `{"status":"UP"}` из `curl -sf http://host.docker.internal:28180/actuator/health`
+  на 7-й попытке (6 пауз по 2 с, стадия 13,7 с);
+* автотесты — `mvn -B test -DbaseUrl=http://host.docker.internal:28180` →
+  `Tests run: 38, Failures: 0, Errors: 0, Skipped: 0` и `BUILD SUCCESS`: все проверки идут через
+  gateway nginx, как и ручная проверка;
+* `post` — `down -v`, затем `Untagged: shortener-service:ci-3` и
+  `Untagged: shortener-gateway:ci-3`, и «CI-стек удалён; артефакты сборки — Allure, JaCoCo,
+  протоколы тестов».
+
+Артефакты сборки №3 (`api/json?depth=1`): 586 файлов, среди них `allure-maven.html` (отчёт
+автотестов) и `jacoco.xml` / `jacoco.csv` / `jacoco-sessions.html` (отчёт покрытия); протоколы
+тестов отдельным артефактом не лежат — их показывает вкладка Test Result (шаг `junit`).
+
+История падений до зелёного прогона: сборка №1 споткнулась на «Образ приложения»
+(`the --mount option requires BuildKit`) — помог `docker-buildx` в образ Jenkins; сборка №2 —
+на «Стек: поднимается» из-за bind-монтирования (см. раздел выше). Обе починки видны в
+`git log` по коммитам `3756983` и `18f0593`.
