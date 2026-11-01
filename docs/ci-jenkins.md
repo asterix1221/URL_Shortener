@@ -199,3 +199,11 @@ Testcontainers; `TESTCONTAINERS_HOST_OVERRIDE` нужен тем же интег
 (`the --mount option requires BuildKit`) — помог `docker-buildx` в образ Jenkins; сборка №2 —
 на «Стек: поднимается» из-за bind-монтирования (см. раздел выше). Обе починки видны в
 `git log` по коммитам `3756983` и `18f0593`.
+
+После ветки `docs/javadoc-api` (Javadoc по всему main-коду и `maven-javadoc-plugin` 3.12.0 в
+`shortener-service/pom.xml`) `main` был перепроверен сборкой №4 на коммите `29cfc1c`:
+`SUCCESS` за 117 511 мс, все семь стадий зелёные, в консоли те же `Tests run: 99` /
+`Tests run: 19` / `All coverage checks have been met.`, `Tests run: 38` в автотестах,
+737 архивированных артефактов. Плагин в сборке не участвует — execution не привязан к фазе,
+и `mvn verify` его не вызывает; генерация документации отдельной командой описана в README
+(раздел «Документация кода (Javadoc)»), выход — `shortener-service/target/reports/apidocs`.
