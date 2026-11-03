@@ -1,0 +1,109 @@
+# EXPLAIN (ANALYZE, BUFFERS) — состояние missing1
+# время 2026-11-03T17:13:06Z
+# код ссылки 1RGa, id 343144
+# индекс ix_click_events_link_ts присутствует: False
+# точное число строк click_events: 9732594
+# n_live_tup (оценка, после перезапуска БД не обновлё autovacuum'ом): 2375
+# seq_scan / idx_scan до: 3323 / 0 (само это измерение добавляет скан — он в счётчике «после»)
+
+## countByLinkId
+                                                                   QUERY PLAN                                                                    
+-------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize Aggregate  (cost=201758.71..201758.72 rows=1 width=8) (actual time=285.771..290.129 rows=1 loops=1)
+   Buffers: shared hit=16071 read=133745
+   ->  Gather  (cost=201758.50..201758.71 rows=2 width=8) (actual time=285.365..290.102 rows=3 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=16071 read=133745
+         ->  Partial Aggregate  (cost=200758.50..200758.51 rows=1 width=8) (actual time=273.964..273.965 rows=1 loops=3)
+               Buffers: shared hit=16071 read=133745
+               ->  Parallel Seq Scan on click_events  (cost=0.00..200492.28 rows=106488 width=0) (actual time=3.007..269.080 rows=83333 loops=3)
+                     Filter: (link_id = 343144)
+                     Rows Removed by Filter: 3160865
+                     Buffers: shared hit=16071 read=133745
+ Planning:
+   Buffers: shared hit=62 read=1
+ Planning Time: 0.478 ms
+ JIT:
+   Functions: 14
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 0.576 ms, Inlining 0.000 ms, Optimization 0.457 ms, Emission 8.615 ms, Total 9.648 ms
+ Execution Time: 302.805 ms
+(20 rows)
+
+## clicksByDay
+                                                                      QUERY PLAN                                                                       
+-------------------------------------------------------------------------------------------------------------------------------------------------------
+ Finalize GroupAggregate  (cost=211182.88..243965.17 rows=255571 width=12) (actual time=279.373..286.729 rows=91 loops=1)
+   Group Key: ((date_trunc('day'::text, (clicked_at AT TIME ZONE 'UTC'::text)))::date)
+   Buffers: shared hit=16176 read=133714
+   ->  Gather Merge  (cost=211182.88..238427.80 rows=212976 width=12) (actual time=279.266..286.663 rows=273 loops=1)
+         Workers Planned: 2
+         Workers Launched: 2
+         Buffers: shared hit=16176 read=133714
+         ->  Partial GroupAggregate  (cost=210182.86..212845.06 rows=106488 width=12) (actual time=260.851..267.890 rows=91 loops=3)
+               Group Key: ((date_trunc('day'::text, (clicked_at AT TIME ZONE 'UTC'::text)))::date)
+               Buffers: shared hit=16176 read=133714
+               ->  Sort  (cost=210182.86..210449.08 rows=106488 width=4) (actual time=260.778..263.835 rows=83333 loops=3)
+                     Sort Key: ((date_trunc('day'::text, (clicked_at AT TIME ZONE 'UTC'::text)))::date)
+                     Sort Method: quicksort  Memory: 3073kB
+                     Buffers: shared hit=16176 read=133714
+                     Worker 0:  Sort Method: quicksort  Memory: 3073kB
+                     Worker 1:  Sort Method: quicksort  Memory: 3073kB
+                     ->  Parallel Seq Scan on click_events  (cost=0.00..201290.94 rows=106488 width=4) (actual time=4.631..252.909 rows=83333 loops=3)
+                           Filter: (link_id = 343144)
+                           Rows Removed by Filter: 3160865
+                           Buffers: shared hit=16102 read=133714
+ Planning:
+   Buffers: shared hit=83 read=3
+ Planning Time: 0.251 ms
+ JIT:
+   Functions: 27
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 1.324 ms, Inlining 0.000 ms, Optimization 0.659 ms, Emission 13.188 ms, Total 15.171 ms
+ Execution Time: 300.803 ms
+(28 rows)
+
+## topReferrers
+                                                                             QUERY PLAN                                                                             
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=202030.87..202030.90 rows=10 width=40) (actual time=260.182..264.148 rows=1 loops=1)
+   Buffers: shared hit=16134 read=133701
+   ->  Sort  (cost=202030.87..202030.92 rows=20 width=40) (actual time=255.227..259.192 rows=1 loops=1)
+         Sort Key: (count(*)) DESC
+         Sort Method: quicksort  Memory: 25kB
+         Buffers: shared hit=16134 read=133701
+         ->  Finalize GroupAggregate  (cost=202025.37..202030.44 rows=20 width=40) (actual time=255.197..259.162 rows=1 loops=1)
+               Group Key: (COALESCE(referrer, ''::text))
+               Buffers: shared hit=16131 read=133701
+               ->  Gather Merge  (cost=202025.37..202030.04 rows=40 width=40) (actual time=255.179..259.144 rows=3 loops=1)
+                     Workers Planned: 2
+                     Workers Launched: 2
+                     Buffers: shared hit=16131 read=133701
+                     ->  Sort  (cost=201025.35..201025.40 rows=20 width=40) (actual time=243.854..243.855 rows=1 loops=3)
+                           Sort Key: (COALESCE(referrer, ''::text))
+                           Sort Method: quicksort  Memory: 25kB
+                           Buffers: shared hit=16131 read=133701
+                           Worker 0:  Sort Method: quicksort  Memory: 25kB
+                           Worker 1:  Sort Method: quicksort  Memory: 25kB
+                           ->  Partial HashAggregate  (cost=201024.72..201024.92 rows=20 width=40) (actual time=243.829..243.830 rows=1 loops=3)
+                                 Group Key: COALESCE(referrer, ''::text)
+                                 Batches: 1  Memory Usage: 24kB
+                                 Buffers: shared hit=16115 read=133701
+                                 Worker 0:  Batches: 1  Memory Usage: 24kB
+                                 Worker 1:  Batches: 1  Memory Usage: 24kB
+                                 ->  Parallel Seq Scan on click_events  (cost=0.00..200492.28 rows=106488 width=32) (actual time=3.449..229.989 rows=83333 loops=3)
+                                       Filter: (link_id = 343144)
+                                       Rows Removed by Filter: 3160865
+                                       Buffers: shared hit=16115 read=133701
+ Planning:
+   Buffers: shared hit=89
+ Planning Time: 0.354 ms
+ JIT:
+   Functions: 28
+   Options: Inlining false, Optimization false, Expressions true, Deforming true
+   Timing: Generation 1.288 ms, Inlining 0.000 ms, Optimization 0.653 ms, Emission 14.347 ms, Total 16.288 ms
+ Execution Time: 277.879 ms
+(37 rows)
+
+# seq_scan / idx_scan после: 3335 / 0
