@@ -3,6 +3,7 @@
 #   .\scripts\prepare-stats.ps1                       # 20 ссылок + 5 000 000 событий
 #   .\scripts\prepare-stats.ps1 -Rows 500000          # меньше строк (быстрый прогон)
 #   .\scripts\prepare-stats.ps1 -Clean                # удалить прежний посев и выйти
+#   .\scripts\prepare-stats.ps1 -RefreshFeed          # только свежий токен в stats.csv, без посева
 #
 # Скрипт регистрирует нагрузочную учётку (те же креды, что у sim.Auth), создаёт 20 ссылок,
 # засевает по ним события клика и пишет shortener-loadtests\src\test\resources\stats.csv с
@@ -14,7 +15,8 @@
 param(
     [int]$Links = 20,
     [int]$Rows = 5000000,
-    [switch]$Clean
+    [switch]$Clean,
+    [switch]$RefreshFeed
 )
 
 $ErrorActionPreference = 'Stop'
@@ -55,6 +57,30 @@ try {
 }
 $token = (Invoke-RestMethod -Method Post -Uri "$base/api/auth/login" -ContentType 'application/json' -Body $credentials).accessToken
 if (-not $token) { throw 'Сервис не вернул accessToken' }
+
+if ($RefreshFeed) {
+    # Токен живёт час, а серия 7.4 (три состояния с пересборкой образа) — дольше. Пересевать
+    # ради нового токена нельзя: таблица изменится, и состояния перестанут быть сравнимыми, поэтому
+    # здесь только вход и только перезапись фида по тем же кодам засеянных ссылок.
+    Write-Host "Обновляем фид по прежним засеянным ссылкам (посев не трогаем)…"
+    $codes = @((Invoke-Sql @"
+SELECT l.code
+FROM links l
+WHERE l.id IN (SELECT DISTINCT link_id FROM click_events WHERE user_agent = '$marker')
+ORDER BY l.code
+LIMIT $Links;
+"@) -split '\r?\n' | Where-Object { $_ })
+    if ($codes.Count -ne $Links) {
+        throw "По маркеру '$marker' найдено $($codes.Count) ссылок, а нужно $Links — посев надо повторить целиком"
+    }
+    foreach ($code in $codes) {
+        if ($code -notmatch '^[0-9A-Za-z_-]{1,64}$') { throw "Неожиданный формат кода: $code" }
+    }
+    $csv = @('token,code') + ($codes | ForEach-Object { '{0},{1}' -f $token, $_ })
+    Set-Content -Path $csvPath -Value $csv -Encoding ascii
+    Write-Host "Фид: $csvPath ($(($csv.Count - 1)) строк), код: $($codes -join ', ')"
+    exit 0
+}
 
 Write-Host "Создаём $Links ссылок…"
 $codes = @()

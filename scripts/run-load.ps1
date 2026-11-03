@@ -32,12 +32,18 @@ if (-not $BaseUrl) {
 $simulationClass = if ($Sim -match 'Simulation$') { $Sim } else { "${Sim}Simulation" }
 $simulationClass = "sim.$simulationClass"
 
-if ($simulationClass -ne 'sim.RedirectSimulation') {
+# Предупреждение про лимит нужно только симуляциям, которые создают ссылки: у StatsSimulation и
+# RedirectSimulation доля создания равна нулю, и проверка на 1000/мин для них — ложный шум.
+if ($simulationClass -in @('sim.MixedSimulation', 'sim.CreateSimulation')) {
     $limitLine = Select-String -Path (Join-Path $repo 'infra\.env') -Pattern '^RATE_LIMIT_CREATE_PER_MINUTE=(\d+)'
     if ($limitLine) {
         $limit = [int]$limitLine.Matches.Groups[1].Value
         # Доля запросов на создание ссылок: в смешанном сценарии это 5% общей нагрузки.
-        $createShare = if ($simulationClass -eq 'sim.MixedSimulation') { 0.05 } else { 1 }
+        $createShare = switch ($simulationClass) {
+            'sim.MixedSimulation' { 0.05 }
+            'sim.CreateSimulation' { 1 }
+            default { 0 }
+        }
         # Пиковая интенсивность прогона: spike даёт десятикратный пик, ramp — верхнюю границу.
         $peak = [math]::Max($Rps, [math]::Max($RpsFrom, $RpsTo))
         if ($Profile -eq 'spike') { $peak *= 10 }
