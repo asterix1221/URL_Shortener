@@ -2,7 +2,7 @@ package com.example.shortener.link;
 
 import com.example.shortener.cache.LinkCache;
 import com.example.shortener.clicks.ClickEventMessage;
-import com.example.shortener.clicks.ClickEventPublisher;
+import com.example.shortener.clicks.ClickRecorder;
 import com.example.shortener.common.Base62;
 import com.example.shortener.common.BadRequestException;
 import com.example.shortener.common.ConflictException;
@@ -56,7 +56,7 @@ class LinkServiceTest {
     private LinkCache cache;
 
     @Mock
-    private ClickEventPublisher clickEvents;
+    private ClickRecorder clickEvents;
 
     private LinkService service;
 
@@ -173,7 +173,7 @@ class LinkServiceTest {
 
         assertThat(target).isEqualTo("https://example.com/target");
         ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
-        verify(clickEvents).publish(event.capture());
+        verify(clickEvents).record(event.capture());
         assertThat(event.getValue().linkId()).isEqualTo(link.getId());
         // click_count для ссылки без лимита больше не пишется из потока редиректа
         verify(links, never()).increaseClickCount(any());
@@ -189,7 +189,7 @@ class LinkServiceTest {
         assertThat(target).isEqualTo("https://cached.example.com");
         verify(links, never()).findByCode(any());
         ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
-        verify(clickEvents).publish(event.capture());
+        verify(clickEvents).record(event.capture());
         assertThat(event.getValue().linkId()).isEqualTo(7_000L);
     }
 
@@ -212,7 +212,7 @@ class LinkServiceTest {
         service.redirect("code1", "203.0.113.5", "JUnit-agent", "https://referrer.example.com/page");
 
         ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
-        verify(clickEvents).publish(event.capture());
+        verify(clickEvents).record(event.capture());
         assertThat(event.getValue().ipHash()).hasSize(64).matches("[0-9a-f]{64}");
         assertThat(event.getValue().ipHash()).doesNotContain("203.0.113.5");
         assertThat(event.getValue().userAgent()).isEqualTo("JUnit-agent");
@@ -225,7 +225,7 @@ class LinkServiceTest {
 
         assertThatExceptionOfType(NotFoundException.class)
                 .isThrownBy(() -> service.redirect("missing", "127.0.0.1", null, null));
-        verify(clickEvents, never()).publish(any());
+        verify(clickEvents, never()).record(any());
     }
 
     @Test
@@ -241,7 +241,7 @@ class LinkServiceTest {
 
         assertThatExceptionOfType(GoneException.class)
                 .isThrownBy(() -> service.redirect(link.getCode(), "127.0.0.1", null, null));
-        verify(clickEvents, never()).publish(any());
+        verify(clickEvents, never()).record(any());
     }
 
     @Test
@@ -321,7 +321,7 @@ class LinkServiceTest {
         service.redirect("code1", "   ", "agent", null);
 
         ArgumentCaptor<ClickEventMessage> event = ArgumentCaptor.forClass(ClickEventMessage.class);
-        verify(clickEvents).publish(event.capture());
+        verify(clickEvents).record(event.capture());
         assertThat(event.getValue().ipHash()).isNull();
     }
 

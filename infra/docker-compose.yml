@@ -65,6 +65,19 @@ services:
       KAFKA_BOOTSTRAP: kafka:19092
       APP_CLICKS_CONSUMER_ENABLED: ${APP_CLICKS_CONSUMER_ENABLED:-true}
       RATE_LIMIT_CREATE_PER_MINUTE: ${RATE_LIMIT_CREATE_PER_MINUTE:-10}
+      # Переключатели экспериментов этапа 7. Значения из shell перекрывают infra/.env, поэтому
+      # вариант прогона задаётся одной командой: `$env:APP_CACHE_ENABLED='false'` перед
+      # scripts\reset-state.ps1. Дефолты совпадают с поведением до этапа 7.
+      APP_CACHE_ENABLED: ${APP_CACHE_ENABLED:-true}
+      APP_CLICKS_MODE: ${APP_CLICKS_MODE:-async}
+      # Проверка предложения из docs/experiments/05-stress.md (шаг 5): у топика click-events три
+      # партиции, слушатель по умолчанию идёт одним потоком и не использует остальные две.
+      # Дефолт 1 = поведение baseline и всех серий до 7.5; 3 включают переменной окружения.
+      SPRING_KAFKA_LISTENER_CONCURRENCY: ${SPRING_KAFKA_LISTENER_CONCURRENCY:-1}
+      SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE: ${SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE:-10}
+      # Пустое значение безопасно и запуск не меняет; через него включают JFR для soak-прогона
+      # (`-XX:StartFlightRecording=…`, см. docs/experiments/06-soak.md).
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:-}
     # Лимиты нужны не для экономии, а для воспроизводимости baseline: без них сервис
     # выбирает все ядра VM и цифры двух прогонов сравнивать нельзя.
     cpus: "2"

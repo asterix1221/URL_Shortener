@@ -34,6 +34,14 @@ public final class LoadParams {
     /** Длительность основного участка, секунд. */
     public static final int DURATION_SEC = Integer.parseInt(env("DURATION_SEC", "120"));
 
+    /**
+     * Файл-фидер с кодами редиректа. {@code codes.csv} — весь засев из 100 000 ссылок,
+     * {@code codes-hot.csv} — выборка в 2000 кодов, которую кэш успевает прогреть: при полном
+     * севе случайные коды за две минуты затрагивают малую часть ключей, и сравнение «с кэшем /
+     * без кэша» превращается в сравнение двух промахов.
+     */
+    public static final String CODES_FILE = env("CODES_FILE", "codes.csv");
+
     /** Длина пика в профиле {@code spike} — фиксирована, чтобы сравнение прогонов было честным. */
     private static final Duration SPIKE_DURATION = Duration.ofSeconds(30);
 

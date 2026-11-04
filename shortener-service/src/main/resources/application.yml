@@ -34,10 +34,12 @@ app:
     ttl-seconds: ${JWT_TTL_SECONDS:3600}
   ip-salt: ${IP_SALT:change_me_ip_salt}
   cache:
+    enabled: ${APP_CACHE_ENABLED:true}
     ttl-seconds: 3600
   rate-limit:
     create-per-minute: ${RATE_LIMIT_CREATE_PER_MINUTE:10}
   clicks:
+    mode: ${APP_CLICKS_MODE:async}
     consumer-enabled: ${APP_CLICKS_CONSUMER_ENABLED:true}
 
 management:
