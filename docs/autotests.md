@@ -242,7 +242,7 @@ shortener-service\target docs\coverage.json`.
 
 | Проверка | Реальный результат |
 |---|---|
-| `scripts/smoke.ps1 -BaseUrl http://localhost:28080` | `no token: 401`, `created: Q8q → http://localhost:28080/Q8q`, `redirects: 302 302 410`, `totalClicks: 2` |
+| `scripts/smoke.ps1 -BaseUrl http://localhost:28080` | `no token: 401`, `created: 221Y → http://localhost:28080/221Y`, `redirects: 302 302 410`, `stats: totalClicks=2 (появились на 1-й секунде)`, код выхода 0. Скрипт проверяет, а не только печатает: другой `401`, иная последовательность переходов или ноль кликов за 20 с ожидания — `throw` и ненулевой выход |
 | Автотесты этапа 4 против gateway, без изменений | `Tests run: 38, Failures: 0, Errors: 0` (Auth 9, Redirect 5, Security 6, Stats 6, LinkCreate 12), BUILD SUCCESS за 15,5 с |
 | Клиентский IP (`server.forward-headers-strategy: native`) | клик с `X-Forwarded-For: 198.51.100.9` → в `click_events.ip_hash` `562c574e19…731d9`, что ровно SHA-256 от `198.51.100.9` + соль; клик без заголовка → `b2e532a6b5…6b7063` = хостовый адрес моста Docker (`172.21.0.1`), он же видно в `gateway.log` |
 | Метрики снаружи | `GET /actuator/prometheus` через gateway → 403 (`access forbidden by rule` в логе nginx); из контейнера gateway на `http://app:8080/actuator/prometheus` → 200 |
