@@ -32,7 +32,7 @@ Write-Host "`nПереключатели, дошедшие до контейне
 $appId = (docker compose @compose ps -q app).Trim()
 if (-not $appId) { throw "compose не видит контейнер app" }
 docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' $appId |
-    Select-String -Pattern '^(APP_CACHE_ENABLED|APP_CLICKS_MODE|APP_CLICKS_CONSUMER_ENABLED|SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE|RATE_LIMIT_CREATE_PER_MINUTE|JAVA_TOOL_OPTIONS)=' |
+    Select-String -Pattern '^(APP_CACHE_ENABLED|APP_CLICKS_MODE|APP_CLICKS_CONSUMER_ENABLED|SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE|SPRING_KAFKA_LISTENER_CONCURRENCY|RATE_LIMIT_CREATE_PER_MINUTE|JAVA_TOOL_OPTIONS)=' |
     ForEach-Object { "  $($_.Line)" }
 
 Write-Host "`nЖдём health на http://localhost:$appPort/actuator/health…"
