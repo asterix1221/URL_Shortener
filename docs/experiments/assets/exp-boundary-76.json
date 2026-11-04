@@ -1,0 +1,14 @@
+{
+ "soak": {
+  "rps": 644,
+  "duration_s": 900,
+  "utc_before_warm": "2026-11-04T18:02:13Z",
+  "links_before_warm": 354064,
+  "clicks_before_warm": 11838970,
+  "links_before": 355315,
+  "clicks_before": 11862989,
+  "links_after": 384295,
+  "clicks_after": 12413609,
+  "utc_after_snapshot": "2026-11-04T19:23:07Z"
+ }
+}
