@@ -17,3 +17,5 @@ shortener-loadtests/src/test/resources/stats.csv
 # рабочие документы, не публичные
 /PLAN.md
 /CLAUDE.md
+# дизайн-спеки и планы этапов — рабочий артефакт, в репозитории не публикуется
+/docs/superpowers/
