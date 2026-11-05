@@ -29,6 +29,13 @@ describe('request', () => {
       .resolves.toEqual({ ok: true, data: undefined });
   });
 
+  it('2xx с пустым телом — undefined, до JSON.parse дело не доходит', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(null, { status: 201 }));
+    await expect(request<void>({ path: '/api/auth/register', method: 'POST' }))
+      .resolves.toEqual({ ok: true, data: undefined });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
   it('сообщение и Retry-After приходят из ошибки', async () => {
     json(429, { status: 429, message: 'too many link creations' }, { 'Retry-After': '17' });
     const r = await request({ path: '/api/links', method: 'POST' });

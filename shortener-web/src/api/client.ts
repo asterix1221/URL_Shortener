@@ -36,6 +36,10 @@ export async function request<T>(options: RequestOptions): Promise<ApiResult<T>>
     // ответ (например, HTML из SPA-fallback вместо JSON) был бы показан как «проблема со
     // связью». Поток после неудачного .json() не перечитать, поэтому текст, а не json().
     const raw = await response.text();
+    // пустое тело у 2xx — «сервер ничего не прислал» (register отвечает 201 без тела),
+    // а не «прислал битый JSON»: JSON.parse('') бросал бы и регистрация выглядела
+    // упавшей при полностью успешном запросе. Неразбираемое тело ниже всё ещё ошибка.
+    if (raw.length === 0) return { ok: true, data: undefined as T };
     try {
       return { ok: true, data: JSON.parse(raw) as T };
     } catch {
