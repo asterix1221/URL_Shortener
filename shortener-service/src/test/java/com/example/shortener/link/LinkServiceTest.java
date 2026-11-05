@@ -28,6 +28,7 @@ import org.mockito.quality.Strictness;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -113,7 +114,7 @@ class LinkServiceTest {
     void rejectsReservedAlias() {
         when(links.nextId()).thenReturn(1L);
 
-        for (String reserved : List.of("api", "actuator", "swagger-ui")) {
+        for (String reserved : List.of("api", "actuator", "swagger-ui", "app", "assets")) {
             assertThatExceptionOfType(BadRequestException.class)
                     .isThrownBy(() -> service.create(USER_ID,
                             new CreateLinkRequest("https://example.com", reserved, null, null)))
@@ -311,6 +312,26 @@ class LinkServiceTest {
 
         assertThat(result.getContent()).singleElement()
                 .satisfies(response -> assertThat(response.shortUrl()).isEqualTo("http://localhost:8080/mine"));
+    }
+
+    @Test
+    void listsOwnedLinksNewestFirst() {
+        // Хелпер link() ставит createdAt = now() обеим сущностям, поэтому порядок внутри
+        // страницы задаёт заглушка репозитория; проверяется только Sort, который сервис
+        // передаёт в Pageable — без него страницы шли бы в произвольном порядке Postgres.
+        Link older = link("aaa", USER_ID, true, null, null);
+        Link newer = link("bbb", USER_ID, true, null, null);
+        when(links.findByUserId(eq(USER_ID), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(newer, older)));
+
+        service.list(USER_ID, 0, 20);
+
+        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
+        verify(links).findByUserId(eq(USER_ID), pageable.capture());
+        assertThat(pageable.getValue().getSort().getOrderFor("createdAt"))
+                .isNotNull()
+                .extracting(Sort.Order::getDirection)
+                .isEqualTo(Sort.Direction.DESC);
     }
 
     @Test

@@ -21,7 +21,10 @@ public interface LinkRepository extends JpaRepository<Link, Long> {
     /** Проверка занятости алиаса перед сохранением. */
     boolean existsByCode(String code);
 
-    /** Свои ссылки пользователя страницей; порядок внутри страницы БД не задаётся. */
+    /**
+     * Свои ссылки пользователя страницей; порядок внутри страницы задаёт не запрос, а
+     * {@code Pageable} вызывающего — {@code LinkService.list} передаёт {@code createdAt DESC}.
+     */
     Page<Link> findByUserId(Long userId, Pageable pageable);
 
     /**

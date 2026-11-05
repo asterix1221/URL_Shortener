@@ -6,6 +6,8 @@ import java.net.http.HttpResponse;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.HttpEntity;
@@ -103,8 +105,9 @@ class LinkLifecycleIT extends AbstractIT {
     @Test
     void listPaginatesOwnLinks() {
         String token = registerAndLogin();
+        List<String> created = new ArrayList<>();
         for (int i = 0; i < 3; i++) {
-            createLink(token, Map.of("url", "https://example.com/pagination-" + i));
+            created.add(createLink(token, Map.of("url", "https://example.com/pagination-" + i)).code());
         }
 
         ResponseEntity<Map<String, Object>> page = rest.exchange("/api/links?page=0&size=2", HttpMethod.GET,
@@ -115,6 +118,14 @@ class LinkLifecycleIT extends AbstractIT {
         assertThat(page.getBody())
                 .containsEntry("totalElements", 3)
                 .containsEntry("size", 2)
-                .hasEntrySatisfying("content", content -> assertThat((java.util.List<?>) content).hasSize(2));
+                .hasEntrySatisfying("content", content -> assertThat(codes(content))
+                        // Порядок — часть контракта, который читает UI: createdAt DESC, поэтому
+                        // на первой странице две самые свежие ссылки (третья созданная впереди).
+                        .containsExactly(created.get(2), created.get(1)));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<String> codes(Object content) {
+        return ((List<Map<String, Object>>) content).stream().map(row -> (String) row.get("code")).toList();
     }
 }
