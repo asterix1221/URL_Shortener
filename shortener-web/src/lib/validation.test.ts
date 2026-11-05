@@ -11,10 +11,13 @@ describe('validateLinkForm', () => {
   it('требует url и режет его по 2048', () => {
     expect(validateLinkForm({ ...base, url: '' }, now).url).toBe('errors.required');
     expect(validateLinkForm({ ...base, url: 'x'.repeat(2049) }, now).url).toBe('errors.urlLong');
+    expect(validateLinkForm({ ...base, url: 'x'.repeat(2048) }, now).url).toBeUndefined();
     expect(validateLinkForm(base, now)).toEqual({});
   });
   it('alias: формат и резерв', () => {
     expect(validateLinkForm({ ...base, alias: 'ab' }, now).alias).toBe('errors.aliasFormat');
+    expect(validateLinkForm({ ...base, alias: 'a'.repeat(33) }, now).alias).toBe('errors.aliasFormat');
+    expect(validateLinkForm({ ...base, alias: 'a'.repeat(32) }, now).alias).toBeUndefined();
     expect(validateLinkForm({ ...base, alias: 'a!c' }, now).alias).toBe('errors.aliasFormat');
     expect(validateLinkForm({ ...base, alias: 'APP' }, now).alias).toBe('errors.aliasReserved');
     expect(validateLinkForm({ ...base, alias: 'app' }, now).alias).toBe('errors.aliasReserved');
@@ -29,10 +32,14 @@ describe('validateLinkForm', () => {
       .toBe('errors.expiresPast');
     expect(validateLinkForm({ ...base, expiresAt: '2026-11-05T00:00' }, now).expiresAt).toBeUndefined();
   });
-  it('maxClicks — целое не меньше 1', () => {
+  it('maxClicks — целое от 1 до 2147483647', () => {
     expect(validateLinkForm({ ...base, maxClicks: '0' }, now).maxClicks).toBe('errors.clicksMin');
     expect(validateLinkForm({ ...base, maxClicks: '-2' }, now).maxClicks).toBe('errors.clicksMin');
     expect(validateLinkForm({ ...base, maxClicks: '1.5' }, now).maxClicks).toBe('errors.clicksInteger');
+    expect(validateLinkForm({ ...base, maxClicks: '2147483648' }, now).maxClicks).toBe('errors.clicksMax');
+    expect(validateLinkForm({ ...base, maxClicks: '99999999999999999999' }, now).maxClicks)
+      .toBe('errors.clicksMax');
+    expect(validateLinkForm({ ...base, maxClicks: '2147483647' }, now).maxClicks).toBeUndefined();
     expect(validateLinkForm({ ...base, maxClicks: '7' }, now).maxClicks).toBeUndefined();
   });
 });
@@ -45,8 +52,10 @@ describe('validateCredentials', () => {
       .toBe('errors.email');
     expect(validateCredentials({ email: ' a@b.co ', password: 'Passw0rd!' }).email).toBeUndefined();
   });
-  it('password: 8–72, пустой нельзя', () => {
+  it('password: 8–72, пустой и из одних пробелов нельзя', () => {
     expect(validateCredentials({ email: 'a@b.co', password: '' }).password).toBe('errors.required');
+    expect(validateCredentials({ email: 'a@b.co', password: '        ' }).password).toBe('errors.required');
+    expect(validateCredentials({ email: 'a@b.co', password: ' Passw0rd! ' }).password).toBeUndefined();
     expect(validateCredentials({ email: 'a@b.co', password: 'short' }).password).toBe('errors.password');
     expect(validateCredentials({ email: 'a@b.co', password: 'x'.repeat(73) }).password).toBe('errors.password');
     expect(validateCredentials({ email: 'a@b.co', password: 'Passw0rd!' })).toEqual({});
