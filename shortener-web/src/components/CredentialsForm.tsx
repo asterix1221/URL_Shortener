@@ -64,8 +64,9 @@ export function CredentialsForm({ mode, onSubmit, onSwitchMode }: Props) {
 
   return (
     // `noValidate`: подсказки даёт `validateCredentials` по локалям словаря, а не встроенный
-    // текст браузера, который ещё и блокирует отправку до нашей валидации.
-    <form onSubmit={handleSubmit} noValidate>
+    // текст браузера, который ещё и блокирует отправку до нашей валидации. `aria-busy`: `disabled`
+    // на кнопке ассистивным технологиям ничего не сообщает, а занятая форма — сообщает.
+    <form onSubmit={handleSubmit} noValidate aria-busy={busy}>
       <div>
         <label htmlFor="auth-email">{t('auth.email')}</label>
         <input
@@ -77,6 +78,9 @@ export function CredentialsForm({ mode, onSubmit, onSwitchMode }: Props) {
           onChange={(event) => {
             setEmail(event.target.value);
             setEmailError(null);
+            // серверная ошибка уровня формы относится к паре «почта + пароль» целиком: пока её не
+            // убрали при вводе, под формой висит «неверные данные» рядом с уже переписанным полем
+            setFormError(null);
           }}
           aria-invalid={emailError !== null}
           aria-describedby={emailError === null ? undefined : 'auth-email-error'}
@@ -89,11 +93,12 @@ export function CredentialsForm({ mode, onSubmit, onSwitchMode }: Props) {
           id="auth-password"
           name="password"
           type="password"
-          autoComplete="current-password"
+          autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
           value={password}
           onChange={(event) => {
             setPassword(event.target.value);
             setPasswordError(null);
+            setFormError(null);
           }}
           aria-invalid={passwordError !== null}
           aria-describedby={passwordError === null ? undefined : 'auth-password-error'}

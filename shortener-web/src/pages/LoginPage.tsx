@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, type KeyboardEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import type { ApiFailure } from '../api/types';
 import { useAuth } from '../auth/useAuth';
@@ -10,6 +10,9 @@ const MODES: readonly { value: AuthMode; labelKey: Key }[] = [
   { value: 'login', labelKey: 'auth.mode.login' },
   { value: 'register', labelKey: 'auth.mode.register' }
 ];
+
+const PANEL_ID = 'auth-panel';
+const tabId = (value: AuthMode) => `auth-tab-${value}`;
 
 export default function LoginPage() {
   const { signIn, signUp } = useAuth();
@@ -32,20 +35,38 @@ export default function LoginPage() {
     [mode, navigate, signIn, signUp]
   );
 
+  // Стрелка переносит и выбор, и фокус (APG «manual activation» + роуминг tabindex): без
+  // `focus()` фокус остался бы на неактивном табе, который мы только что вывели из порядка обхода.
+  function onTabsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+    event.preventDefault();
+    const step = event.key === 'ArrowRight' ? 1 : -1;
+    const current = MODES.findIndex((option) => option.value === mode);
+    const next = MODES[(current + step + MODES.length) % MODES.length].value;
+    setMode(next);
+    document.getElementById(tabId(next))?.focus();
+  }
+
+  // `.page` принадлежит `AppLayout` (строка 22), поэтому страница — фрагмент: второй `.page` внутри
+  // `main` дал бы двойной padding и вложенный max-width, а обычный `<div>` увёл бы детей из-под
+  // ритма колонки, который задаёт именно `.page > main`.
   return (
-    <div className="page">
+    <>
       {params.get('expired') !== null ? (
         <div className="state" role="status">
           <p>{t('auth.session.expired')}</p>
         </div>
       ) : null}
-      <div role="tablist">
+      <div role="tablist" onKeyDown={onTabsKeyDown}>
         {MODES.map((option) => (
           <button
             key={option.value}
+            id={tabId(option.value)}
             type="button"
             role="tab"
             aria-selected={mode === option.value}
+            aria-controls={PANEL_ID}
+            tabIndex={mode === option.value ? 0 : -1}
             className={mode === option.value ? 'btn' : 'btn-ghost'}
             onClick={() => setMode(option.value)}
           >
@@ -53,17 +74,19 @@ export default function LoginPage() {
           </button>
         ))}
       </div>
-      {/* `key` по режиму: при переключении форма размонтируется, и введённое для одного режима
-          не уезжает в другой вместе с текстом ошибки */}
-      <CredentialsForm
-        key={mode}
-        mode={mode}
-        onSubmit={submit}
-        onSwitchMode={() => setMode(mode === 'login' ? 'register' : 'login')}
-      />
+      {/* `key` по режиму на форме, а не на панели: панель обязана переживать переключение, иначе
+          `aria-controls` указывал бы на пересозданный узел */}
+      <div id={PANEL_ID} role="tabpanel" aria-labelledby={tabId(mode)}>
+        <CredentialsForm
+          key={mode}
+          mode={mode}
+          onSubmit={submit}
+          onSwitchMode={() => setMode(mode === 'login' ? 'register' : 'login')}
+        />
+      </div>
       {/* отзыва токена на сервере нет, поэтому подсказка постоянная: закрыть вкладку — единственный
           способ потерять токен наверняка */}
       <p>{t('auth.hint.no-logout')}</p>
-    </div>
+    </>
   );
 }

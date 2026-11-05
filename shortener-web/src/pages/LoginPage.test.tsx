@@ -32,6 +32,9 @@ describe('LoginPage', () => {
       .mockResolvedValueOnce(new Response('{"accessToken":"T","expiresIn":3600}', { status: 200 }));
     renderWithProviders(<LoginPage />, '/login');
     await user.click(screen.getByRole('tab', { name: /Регистрация/i }));
+    // в режиме регистрации менеджер паролей обязан предложить сохранить новый пароль, а не
+    // подставлять сохранённый
+    expect(screen.getByLabelText(/Пароль/i)).toHaveAttribute('autoComplete', 'new-password');
     await user.type(screen.getByLabelText(/Электронная почта/i), 'a@b.co');
     await user.type(screen.getByLabelText(/Пароль/i), 'Passw0rd!');
     await user.click(screen.getByRole('button', { name: /Создать аккаунт/i }));
@@ -56,6 +59,8 @@ describe('LoginPage', () => {
     expect(screen.getByLabelText(/Электронная почта/i)).toHaveAttribute('aria-invalid', 'true');
     // серверное сообщение на английском не должно просочиться в интерфейс
     expect(screen.queryByText(/email already registered/i)).not.toBeInTheDocument();
+    // заголовок теста обещает «не под формой» — значит уровень формы обязан остаться пустым
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
   it('вход делает один запрос и тоже ведёт в список', async () => {
@@ -143,6 +148,9 @@ describe('LoginPage', () => {
     const button = screen.getByRole('button', { name: /Войти/i });
     await user.click(button);
     expect(button).toBeDisabled();
+    // `disabled` ничего не объявляет ассистивным технологиям, а форма — объявляет: пока запрос не
+    // вернулся, область обязана быть занята
+    expect(document.querySelector('form')).toHaveAttribute('aria-busy', 'true');
     // спиннер обязано видно в DOM, но не в дереве доступных имён: он `aria-hidden`, и доступное
     // имя кнопки обязано остаться «Войти», чтобы локаторы выше находили её и во время запроса
     expect(button.querySelector('.spinner')).not.toBeNull();
@@ -160,5 +168,76 @@ describe('LoginPage', () => {
     expect(screen.getByRole('button', { name: /Создать аккаунт/i })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: /Уже есть аккаунт\?/i }));
     expect(screen.getByRole('tab', { name: /Вход/i })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('табы образуют законченный паттерн: панель, aria-controls и роуминг клавишами', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />, '/login');
+    const loginTab = screen.getByRole('tab', { name: /Вход/i });
+    const registerTab = screen.getByRole('tab', { name: /Регистрация/i });
+
+    // без `aria-controls` и `tabpanel` скринридер говорит «вкладка выбрана» и не даёт ни панели, ни
+    // способа в неё попасть; без роуминга tabindex оба таба стоят в порядке обхода
+    expect(loginTab).toHaveAttribute('aria-controls', 'auth-panel');
+    expect(registerTab).toHaveAttribute('aria-controls', 'auth-panel');
+    expect(loginTab).toHaveAttribute('tabIndex', '0');
+    expect(registerTab).toHaveAttribute('tabIndex', '-1');
+    const panel = screen.getByRole('tabpanel');
+    expect(panel).toHaveAttribute('aria-labelledby', loginTab.id);
+    expect(panel).toContainElement(screen.getByRole('button', { name: /Войти/i }));
+
+    await loginTab.focus();
+    await user.keyboard('{ArrowDown}');
+    // обработчик реагирует ровно на две клавиши: «вниз» не обязан ничего менять
+    expect(loginTab).toHaveAttribute('aria-selected', 'true');
+    await user.keyboard('{ArrowRight}');
+    expect(screen.getByRole('tab', { name: /Регистрация/i })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', screen.getByRole('tab', { name: /Регистрация/i }).id);
+    await user.keyboard('{ArrowLeft}');
+    expect(loginTab).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('менеджер паролей в регистрации предлагает новый пароль, а не сохранённый', async () => {
+    const user = userEvent.setup();
+    renderWithProviders(<LoginPage />, '/login');
+    expect(screen.getByLabelText(/Пароль/i)).toHaveAttribute('autoComplete', 'current-password');
+    await user.click(screen.getByRole('tab', { name: /Регистрация/i }));
+    expect(screen.getByLabelText(/Пароль/i)).toHaveAttribute('autoComplete', 'new-password');
+  });
+
+  it('400 с префиксом email кладёт текст под инпут почты', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response('{"status":400,"message":"email: must be a well-formed email address"}', { status: 400 }));
+    renderWithProviders(<LoginPage />, '/login');
+    await user.type(screen.getByLabelText(/Электронная почта/i), 'a@b.co');
+    await user.type(screen.getByLabelText(/Пароль/i), 'Passw0rd!');
+    await user.click(screen.getByRole('button', { name: /Войти/i }));
+
+    // ветка `serverErrorField(...) === 'email'`: в 409-м сообщении двоеточия нет, и сюда она
+    // доходит только этим тестом
+    expect(await screen.findByText('Сервер отклонил данные')).toBeInTheDocument();
+    expect(screen.getByLabelText(/Электронная почта/i)).toHaveAccessibleDescription('Сервер отклонил данные');
+    expect(screen.getByLabelText(/Пароль/i)).toHaveAttribute('aria-invalid', 'false');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('ввод после ошибки уровня формы убирает баннер', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response('{"status":401,"message":"bad credentials"}', { status: 401 }));
+    renderWithProviders(<LoginPage />, '/login');
+    await user.type(screen.getByLabelText(/Электронная почта/i), 'a@b.co');
+    await user.type(screen.getByLabelText(/Пароль/i), 'Passw0rd!');
+    await user.click(screen.getByRole('button', { name: /Войти/i }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Адрес или пароль неверны');
+
+    // иначе «неверный пароль» висит рядом с наполовину переписанной формой до следующего сабмита
+    await user.type(screen.getByLabelText(/Электронная почта/i), 'x');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /Войти/i }));
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Пароль/i), 'x');
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 });
