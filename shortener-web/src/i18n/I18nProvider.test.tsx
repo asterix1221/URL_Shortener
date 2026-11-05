@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { I18nProvider, useI18n } from './I18nProvider';
@@ -44,9 +44,8 @@ describe('I18nProvider', () => {
     vi.stubGlobal('localStorage', createStorage());
   });
   afterEach(() => {
-    // `globals` в vitest-конфиге выключены, поэтому автосбор мусора у testing-library не
-    // регистрируется: без явного `cleanup` второй render нашёл бы два «Links: 7».
-    cleanup();
+    // `cleanup()` больше не локальный: он зарегистрирован один раз в `src/test/setup.ts`
+    // (рулинг 8-D) и действует на всю сюиту — здесь остаётся только снятие стаба с `localStorage`.
     vi.unstubAllGlobals();
   });
 
