@@ -23,7 +23,8 @@ public interface LinkRepository extends JpaRepository<Link, Long> {
 
     /**
      * Свои ссылки пользователя страницей; порядок внутри страницы задаёт не запрос, а
-     * {@code Pageable} вызывающего — {@code LinkService.list} передаёт {@code createdAt DESC}.
+     * {@code Pageable} вызывающего — {@code LinkService.list} передаёт
+     * {@code createdAt DESC, id DESC}.
      */
     Page<Link> findByUserId(Long userId, Pageable pageable);
 

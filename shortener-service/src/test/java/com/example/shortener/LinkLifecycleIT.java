@@ -119,9 +119,21 @@ class LinkLifecycleIT extends AbstractIT {
                 .containsEntry("totalElements", 3)
                 .containsEntry("size", 2)
                 .hasEntrySatisfying("content", content -> assertThat(codes(content))
-                        // Порядок — часть контракта, который читает UI: createdAt DESC, поэтому
-                        // на первой странице две самые свежие ссылки (третья созданная впереди).
+                        // Порядок — часть контракта, который читает UI: createdAt DESC, id DESC,
+                        // поэтому на первой странице две самые свежие ссылки (третья созданная впереди).
                         .containsExactly(created.get(2), created.get(1)));
+
+        ResponseEntity<Map<String, Object>> next = rest.exchange("/api/links?page=1&size=2", HttpMethod.GET,
+                new HttpEntity<>(bearer(token)), new ParameterizedTypeReference<>() {
+                });
+
+        // Вторая страница доказывает остальную часть контракта: строка не повторяется и не
+        // теряется между страницами — там осталась только самая старая из трёх ссылок.
+        assertThat(next.getStatusCode().value()).isEqualTo(200);
+        assertThat(next.getBody())
+                .containsEntry("size", 2)
+                .hasEntrySatisfying("content", content -> assertThat(codes(content))
+                        .containsExactly(created.get(0)));
     }
 
     @SuppressWarnings("unchecked")

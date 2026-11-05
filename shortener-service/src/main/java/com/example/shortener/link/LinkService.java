@@ -181,17 +181,24 @@ public class LinkService {
     }
 
     /**
-     * Ссылки одного пользователя страницей. Порядок задаётся явно — {@code createdAt DESC}:
-     * без сортировки Postgres не гарантирует его вовсе, и одна строка могла бы повториться
-     * на двух страницах или исчезнуть между ними, а список в интерфейсе полагается на то,
-     * что страницы стабильны и идут от свежих ссылок к старым.
+     * Ссылки одного пользователя страницей. Порядок задаётся явно — {@code createdAt DESC,
+     * id DESC}: без сортировки Postgres не гарантирует его вовсе, и одна строка могла бы
+     * повториться на двух страницах или исчезнуть между ними, а список в интерфейсе полагается
+     * на то, что страницы стабильны и идут от свежих ссылок к старым.
+     *
+     * <p>{@code id} вторым ключом убирает остаток неопределённости при равных {@code createdAt}:
+     * {@code scripts/seed.sql} загружает 100 000 ссылок одним {@code INSERT ... SELECT} без
+     * {@code created_at}, колонка берёт {@code DEFAULT now()}, а {@code now()} в Postgres равен
+     * метке транзакции — у всего сида он одинаковый. {@code id} уникален и выдаётся из
+     * {@code link_seq} до вставки, поэтому порядок полон уже на таких данных.
      *
      * @param page номер страницы, отсчёт от нуля
      * @param size размер страницы (контроллер ограничивает сверху 100)
      */
     @Transactional(readOnly = true)
     public Page<LinkResponse> list(Long userId, int page, int size) {
-        return links.findByUserId(userId, PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt")))
+        return links.findByUserId(userId,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")))
                 .map(this::toResponse);
     }
 

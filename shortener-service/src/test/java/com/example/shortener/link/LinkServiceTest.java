@@ -332,6 +332,10 @@ class LinkServiceTest {
                 .isNotNull()
                 .extracting(Sort.Order::getDirection)
                 .isEqualTo(Sort.Direction.DESC);
+        assertThat(pageable.getValue().getSort().getOrderFor("id"))
+                .isNotNull()
+                .extracting(Sort.Order::getDirection)
+                .isEqualTo(Sort.Direction.DESC);
     }
 
     @Test
