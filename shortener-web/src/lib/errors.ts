@@ -2,11 +2,11 @@
  * Разбор тела ошибки сервера в подсказки формы.
  *
  * Для `400` `ApiExceptionHandler` кладёт в `message` **первое** нарушение в формате
- * `имяПоля: сообщение` — `ApiExceptionHandler.java:49-52`
- * (`shortener-service/src/main/java/com/example/shortener/common/`):
- * `error.getField() + ": " + error.getDefaultMessage()` и `findFirst()`. Префикс до первого
- * двоеточия и есть указатель, под какой инпут положить текст, поэтому он здесь отделяется от
- * самого сообщения.
+ * `имяПоля: сообщение` в двух ветках: `MethodArgumentNotValidException` —
+ * `ApiExceptionHandler.java:49-52` (`error.getField() + ": " + error.getDefaultMessage()`,
+ * `findFirst()`) и `ConstraintViolationException` — `:71-74` (то же, через `getPropertyPath()`);
+ * `shortener-service/src/main/java/com/example/shortener/common/`. Префикс до первого двоеточия и
+ * есть указатель, под какой инпут положить текст, поэтому он здесь отделяется от сообщения.
  *
  * Модуль сознательно знает только `ApiFailure` и ничего про валидацию задачи 5: `KNOWN_FIELDS` —
  * это имена компонентов DTO (`link/dto/CreateLinkRequest.java:19-22` +
@@ -25,11 +25,16 @@ const KNOWN_FIELDS = ['url', 'alias', 'expiresAt', 'maxClicks', 'email', 'passwo
 
 /**
  * Разделение по **первому** двоеточию: синтаксис, а не семантика. Префикс поля сервер гарантирует
- * только в ветке `MethodArgumentNotValidException`, остальные `400` — свободный текст, где
- * двоеточие тоже возможно (`LinkService.java:105` бросает
- * `"maxClicks: must be greater than or equal to 1"`), поэтому `'a: b: c'` даёт
- * `{ field: 'a', text: 'b: c' }`. Двоеточия нет вовсе, или оно стоит на нулевой позиции
- * (`': text'`) — префикса нет, и весь текст остаётся сообщением.
+ * только в ветке `MethodArgumentNotValidException`, остальные `400`/`409` — свободный текст, где
+ * двоеточие тоже возможно, но префикс не имя поля: `link/LinkService.java:121` бросает
+ * `"alias already taken: " + alias` (`409`), `:166` — `"link not found: " + code` (`404`).
+ * Префиксы `'alias already taken'`/`'link not found'` состоят из нескольких слов и отсутствуют в
+ * `KNOWN_FIELDS`, поэтому `serverErrorField` даёт `null`, а сплиттер тем временем честно возвращает
+ * `{ field: 'alias already taken', text: ' …' }` — `'a: b: c'` → `{ field: 'a', text: 'b: c' }`.
+ * Написанные вручную `400` того же сервиса (`:101` `"expiresAt: …"`, `:105` `"maxClicks: …"`)
+ * маскируют тот же формат под существующее поле — это не ошибка разбора, а совпадение с контрактом.
+ * Двоеточия нет вовсе, или оно стоит на нулевой позиции (`': text'`) — префикса нет, и весь текст
+ * остаётся сообщением.
  */
 export function splitServerMessage(message: string): { field: string | null; text: string } {
   const separator = message.indexOf(':');

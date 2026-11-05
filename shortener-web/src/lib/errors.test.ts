@@ -7,12 +7,20 @@ describe('splitServerMessage', () => {
     expect(splitServerMessage('too many link creations')).toEqual({ field: null, text: 'too many link creations' });
     expect(splitServerMessage('a: b: c')).toEqual({ field: 'a', text: 'b: c' });
   });
+  it('двоеточие на нулевой позиции — не префикс поля', () => {
+    expect(splitServerMessage(': text')).toEqual({ field: null, text: ': text' });
+  });
+  it('пробелы срезаются с обеих сторон разделителя', () => {
+    expect(splitServerMessage('url :  must not be blank ')).toEqual({ field: 'url', text: 'must not be blank' });
+  });
 });
 
 describe('serverErrorField', () => {
   it('известное поле возвращается, неизвестное — null', () => {
     expect(serverErrorField('url: must not be blank')).toBe('url');
     expect(serverErrorField('alias: reserved word app')).toBe('alias');
+    expect(serverErrorField('url : must not be blank')).toBe('url');
+    expect(serverErrorField('alias already taken: abc')).toBeNull();
     expect(serverErrorField('unknown: x')).toBeNull();
     expect(serverErrorField('a: b: c')).toBeNull();
     expect(serverErrorField('too many link creations')).toBeNull();
