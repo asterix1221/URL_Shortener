@@ -14,6 +14,33 @@ afterEach(cleanup);
 // семантикой (Map моста не чистился между тестами, стаб задачи 7 перекрывал мост целиком).
 installStorageBridge();
 
-// Хук из setup-файла действует на все тестовые файлы, поэтому сброс не нужно вписывать в каждый
-// describe: достаточно одного вызова здесь.
+// Сброс между тестами одного файла обязателен для обоих хранилищ: мост покрывается здесь, а
+// `sessionStorage` — настоящий jsdom-объект, и канал токена (`shortener.token`, задача 8) тек бы
+// из теста в тест, пока тесты не чистят его руками. Порядок вызовов важен: `beforeEach` из
+// setup-файла отрабатывает раньше `beforeEach` самого теста, поэтому тест, который пишет токен
+// в своём хуке или в теле, ничего не теряет.
 beforeEach(resetBridgedStorage);
+beforeEach(() => {
+  sessionStorage.clear();
+});
+
+// В jsdom нет `window.matchMedia` (замерено на этом стенде: `new JSDOM().window.matchMedia` →
+// `undefined`), а `useTheme` (задача 9) спрашивает системную тему на первом рендере — без стаба
+// падал бы каждый тест, монтирующий `AppLayout`, то есть все экраны задач 10–12. `matches: false`
+// значит «светлая тема по умолчанию». Защитная ветка `typeof window.matchMedia === 'function'` в
+// продуктовом коде вместо этого стаба отвергнута: вторая её ветка осталась бы непокрытой
+// навсегда, а тир `src/**` требует 75 % веток.
+Object.defineProperty(window, 'matchMedia', {
+  writable: true,
+  configurable: true,
+  value: (query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: () => {},
+    removeListener: () => {},
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    dispatchEvent: () => false
+  })
+});
