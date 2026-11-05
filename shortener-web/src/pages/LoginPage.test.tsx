@@ -192,9 +192,13 @@ describe('LoginPage', () => {
     expect(loginTab).toHaveAttribute('aria-selected', 'true');
     await user.keyboard('{ArrowRight}');
     expect(screen.getByRole('tab', { name: /Регистрация/i })).toHaveAttribute('aria-selected', 'true');
+    // стрелка переносит и выбор, и фокус: после `{ArrowRight}` активным обязан быть тот таб, а не
+    // прежний — иначе клавиатурный пользователь остался бы на табе, выведенном из порядка обхода
+    expect(document.activeElement).toBe(registerTab);
     expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', screen.getByRole('tab', { name: /Регистрация/i }).id);
     await user.keyboard('{ArrowLeft}');
     expect(loginTab).toHaveAttribute('aria-selected', 'true');
+    expect(document.activeElement).toBe(loginTab);
   });
 
   it('у страницы нет собственного контейнера .page — раскладку навешивает AppLayout', () => {
