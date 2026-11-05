@@ -9,6 +9,10 @@ export type AuthValue = {
   signIn: (email: string, password: string) => Promise<ApiResult<AuthResponse>>;
   signUp: (email: string, password: string) => Promise<ApiResult<AuthResponse>>;
   signOut: () => void;
+  // Предусловие: звонить только по 401. Остальные `!ok` — не истёкший сеанс: `client.ts` отдаёт
+  // `status: 0` на сетевом сбое и аборте и пропускает 500/429 как есть, а гард по любому исходу
+  // стёр бы токен и увёл с формы — иначе `errors.credentials`-путь задачи 10 тонет в выбросе на
+  // /login?expired=1 вместо сообщения в поле. Проба в AuthProvider.test.tsx держит границу.
   handleUnauthorized: () => void;
 };
 

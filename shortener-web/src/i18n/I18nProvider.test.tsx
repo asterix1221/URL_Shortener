@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createStorage } from '../test/storage';
 import { I18nProvider, useI18n } from './I18nProvider';
 
 /**
@@ -8,20 +9,10 @@ import { I18nProvider, useI18n } from './I18nProvider';
  * значения (живёт только с флагом `--localstorage-file`), и vitest 2.1 из-за этого не переносит
  * хранилище jsdom — `getWindowKeys` пропускает ключ, который уже есть в `global` и отсутствует в
  * его списке переносимых ключей. Поэтому тест подставляет ровно то, что в браузере даёт окно:
- * хранилище по ключу.
+ * хранилище по ключу. Фабрика общая с мостом из `src/test/setup.ts` (`src/test/storage.ts`), но
+ * экземпляр новый на каждый тест, поэтому сброс харнесса этому файлу не нужен: `vi.stubGlobal`
+ * перекрывает мост, и чистоту даёт переинсталляция стаба в `beforeEach`.
  */
-function createStorage() {
-  const map = new Map<string, string>();
-  return {
-    getItem: (key: string): string | null => map.get(key) ?? null,
-    setItem: (key: string, value: string): void => {
-      map.set(key, value);
-    },
-    removeItem: (key: string): void => {
-      map.delete(key);
-    }
-  };
-}
 
 /**
  * Минимальный потребитель: страница (задачи 10–13) пишет именно так — через useI18n().
