@@ -38,6 +38,10 @@ describe('Toasts', () => {
     renderWithProviders(<Toasts />);
 
     const status = screen.getByRole('status');
+    // Роль живого региона не должна переезжать на `<ul>`: узел с `role="status"` больше не
+    // список, и `getByRole('list')` исчезает — этот ассерт и ловит такую мутацию (на `listitem`
+    // она не влияет: RTL выводит роль `<li>` из самого элемента).
+    expect(within(status).getByRole('list')).toBeInTheDocument();
     expect(within(status).getAllByRole('listitem')).toHaveLength(2);
     expect(within(status).getByText('Скопировано')).toBeInTheDocument();
     expect(within(status).getByText('Сервис недоступен')).toBeInTheDocument();
