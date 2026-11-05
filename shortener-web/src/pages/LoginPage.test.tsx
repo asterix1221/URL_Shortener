@@ -197,6 +197,14 @@ describe('LoginPage', () => {
     expect(loginTab).toHaveAttribute('aria-selected', 'true');
   });
 
+  it('у страницы нет собственного контейнера .page — раскладку навешивает AppLayout', () => {
+    const { container } = renderWithProviders(<LoginPage />, '/login');
+    // задача 13 монтирует страницу как `<AppLayout><RequireAuth><LoginPage/></RequireAuth></AppLayout>`,
+    // то есть второй `.page` уткнулся бы в `main` вложенным max-width и двойным padding; ни один
+    // тест до фикса класс не искал, поэтому отсутствие фиксируем здесь
+    expect(container.querySelector('.page')).toBeNull();
+  });
+
   it('менеджер паролей в регистрации предлагает новый пароль, а не сохранённый', async () => {
     const user = userEvent.setup();
     renderWithProviders(<LoginPage />, '/login');
