@@ -52,6 +52,7 @@ export const en = {
   'detail.total': 'Clicks',
   'detail.byDay': 'By day (UTC)',
   'detail.referrers': 'Referrers',
+  'detail.referrer': 'Referrer',
   'detail.direct': 'Direct visits',
   'detail.refresh': 'Refresh',
   'detail.hint.lag': 'Clicks are published to Kafka and written in the background, so stats catch up with the redirect.',

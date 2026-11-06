@@ -51,6 +51,7 @@ export const ru = {
   'detail.total': 'Переходов',
   'detail.byDay': 'По дням (UTC)',
   'detail.referrers': 'Источники',
+  'detail.referrer': 'Источник',
   'detail.direct': 'Прямые переходы',
   'detail.refresh': 'Обновить',
   'detail.hint.lag': 'Клик публикуется в Kafka и пишется фоном, поэтому статистика догоняет переход.',

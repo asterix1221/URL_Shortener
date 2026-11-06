@@ -39,4 +39,28 @@ describe('ClicksChart', () => {
     expect(document.querySelector('rect.bar')!.getAttribute('height')).toBe('0');
     expect(screen.getByRole('img', { name: /by day/i })).toBeInTheDocument();
   });
+
+  // Проверка шага, а не наличия подписи в DOM: `getByText` нашёл бы метку и когда она залегла на
+  // соседнюю. `jsdom` не считает глифы (`getBBox` не реализован), поэтому ширина метки оценивается
+  // по числу знаков: 9 px шрифт, ~5 px на знак, самая длинная метка `ru` — «03 нояб.» (8 знаков).
+  // При `BAR_GAP = 6` шаг давал бы 20 px, и тест краснеет.
+  it('шаг столбцов не уже самой широкой подписи дня', () => {
+    render(
+      <ClicksChart
+        byDay={[
+          { date: '2026-11-03', count: 2 },
+          { date: '2026-11-04', count: 5 },
+          { date: '2026-11-05', count: 1 }
+        ]}
+        lang="ru"
+      />
+    );
+    const bars = [...document.querySelectorAll('rect.bar')].map((bar) => Number(bar.getAttribute('x')));
+    const labels = [...document.querySelectorAll('svg text')].filter((node) =>
+      node.getAttribute('text-anchor') === 'middle'
+    );
+    const widest = Math.max(...labels.map((node) => (node.textContent ?? '').length)) * 5;
+    expect(bars[1] - bars[0]).toBeGreaterThanOrEqual(widest);
+    expect(bars[2] - bars[1]).toBeGreaterThanOrEqual(widest);
+  });
 });

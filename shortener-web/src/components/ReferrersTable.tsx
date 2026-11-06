@@ -20,19 +20,20 @@ export function ReferrersTable({ referrers }: { referrers: ReferrerClicks[] }) {
   return (
     <table className="table-grid">
       {/* подпись скрыта CSS (`.table-grid caption`), но даёт таблице имя в дереве доступных имён;
-          первая колонка повторяет то же слово — нового ключа задача 7 не заводит, паритет-тест
-          краснеет на асимметрии словарей */}
+          первая колонка называется в единственном числе (`detail.referrer`), иначе скринридер
+          объявлял «таблица Источники» с колонкой «Источники». Ключ добавлен в оба словаря:
+          паритет-тест `i18n.test.ts:8` краснеет на асимметрии */}
       <caption>{t('detail.referrers')}</caption>
       <thead>
         <tr>
-          <th scope="col">{t('detail.referrers')}</th>
+          <th scope="col">{t('detail.referrer')}</th>
           <th scope="col">{t('detail.total')}</th>
         </tr>
       </thead>
       <tbody>
         {referrers.map((row) => (
           <tr key={row.referrer}>
-            <td data-label={t('detail.referrers')}>{row.referrer === '' ? t('detail.direct') : row.referrer}</td>
+            <td data-label={t('detail.referrer')}>{row.referrer === '' ? t('detail.direct') : row.referrer}</td>
             <td data-label={t('detail.total')}>{formatCount(row.count, lang)}</td>
           </tr>
         ))}

@@ -82,8 +82,11 @@ describe('LinkDetailPage', () => {
     // закладка, открытая после перезапуска вкладки: сеанса в `sessionStorage` уже нет, поэтому
     // запрос уходит с `token ?? ''` и всё равно обязан дать ровно одно нейтральное сообщение
     sessionStorage.clear();
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response('{"status":404,"message":"link not found"}', { status: 404 })
+    // фабрика ответа, а не один экземпляр: тело читается один раз (`client.ts:9`), и при
+    // `mockResolvedValue` второй запрос падал бы в `catch` на `client.ts:48` как `status: 0`, а
+    // «чей текст показать» решался бы порядком продолжений двух `useAsync`, а не моком
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response('{"status":404,"message":"link not found"}', { status: 404 }))
     );
     renderDetail('/links/nope');
     expect(await screen.findByText(/не найдена или не ваша/i)).toBeInTheDocument();
@@ -99,7 +102,11 @@ describe('LinkDetailPage', () => {
         : new Response(JSON.stringify(LINK), { status: 200 })
     );
     renderDetail('/links/abc');
-    await user.click(await screen.findByRole('button', { name: /Обновить/i }));
+    // клику обязан предшествовать конец первого запроса: кнопка обновления неактивна, пока
+    // статистика грузится, и клик, пришедший в этот момент, молча провалился бы — число вызовов
+    // стало бы гонкой вместо проверки
+    await screen.findByText(/по дням/i);
+    await user.click(screen.getByRole('button', { name: /Обновить/i }));
     expect(fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith('/stats'))).toHaveLength(2);
     expect(fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith('/links/abc'))).toHaveLength(1);
   });

@@ -91,7 +91,15 @@ export default function LinkDetailPage() {
         {/* подпись про лаг статистики постоянная: она объясняет расхождение «переход уже был,
             а счётчик ещё нет» в тот момент, когда цифра под запросом уже нарисована */}
         <p>{t('detail.hint.lag')}</p>
-        <button type="button" className="btn-ghost" onClick={refreshStats}>
+        {/* `disabled` на время запроса: эндпоинт статистики закрыт лимитом запросов, поэтому два
+            клика подряд дали бы второй `GET /stats` и, возможно, 429-тост там, где пользователь
+            просто дважды нажал «Обновить» */}
+        <button
+          type="button"
+          className="btn-ghost"
+          onClick={refreshStats}
+          disabled={stats.status === 'loading'}
+        >
           {t('detail.refresh')}
         </button>
         {stats.status === 'loading' ? (
@@ -106,11 +114,16 @@ export default function LinkDetailPage() {
           )
         ) : (
           <>
-            <p>{t('detail.total')}</p>
-            {/* число крупно заголовком: отдельного CSS-класса под счётчик в `base.css` нет, а
-                новых классов добавлять запрещено; `data-metric` — точка ожидания `stats.spec.ts`,
-                не зависящая от локализованного текста вокруг числа */}
+            {/* метка и число в одном `h2`: отдельное `<p>`-подпись слева от заголовка давала
+                безымянный в текстовом смысле заголовок («1 234»), который скринридер объявлял без
+                слова «Переходов», а `h3` графика висел под ним сиротой. `dl` вместо этого не
+                подходит: в `base.css` размера шрифта нет ни у `dl`, ни у `dd` (единственный
+                `font-size` в файле принадлежит `.badge`), а план требует именно крупную цифру —
+                механизм «крупно» в этом проекте и есть заголовок по умолчанию.
+                `data-metric` — точка ожидания `stats.spec.ts`: сам `span` остаётся одним числом,
+                поэтому атрибут не зависит от локализованного текста вокруг него */}
             <h2>
+              {t('detail.total')}:{' '}
               <span data-metric="total-clicks">{formatCount(stats.data.totalClicks, lang)}</span>
             </h2>
             <ClicksChart byDay={stats.data.byDay} lang={lang} />
