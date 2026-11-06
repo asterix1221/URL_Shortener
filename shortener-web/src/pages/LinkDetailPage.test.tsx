@@ -3,10 +3,21 @@ import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LinkResponse, LinkStats } from '../api/types';
+import { EXPIRED_REDIRECT } from '../auth/sessionExpired';
 import { formatCount } from '../lib/format';
 import { saveToken } from '../lib/session';
 import { renderWithProviders } from '../test/render';
 import LinkDetailPage from './LinkDetailPage';
+
+const { mockedNavigate } = vi.hoisted(() => ({ mockedNavigate: vi.fn() }));
+
+// partial-mock: нужен видимый вызов `handleUnauthorized` (он зовёт `navigate`), а `Routes`,
+// `Route`, `useParams` и `Link` из харнесса обязаны остаться настоящими — код ссылки читается
+// из параметров маршрута, без этого страница ушла бы в «не найдена» ещё до запроса.
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('react-router-dom')>()),
+  useNavigate: () => mockedNavigate
+}));
 
 const LINK: LinkResponse = {
   code: 'abc',
@@ -59,6 +70,7 @@ const renderDetail = (path: string) =>
 beforeEach(() => {
   // страница запрашивает карточку и статистику при монтировании, токен обязан лежать до рендера
   saveToken('JWT');
+  mockedNavigate.mockClear();
 });
 
 afterEach(() => {
@@ -137,5 +149,16 @@ describe('LinkDetailPage', () => {
     // кнопка `detail.refresh` на панели статистики одна: `ErrorState` сюда без `retry` — вторая
     // «Обновить» рядом с ней читалась бы как два разных действия
     expect(screen.getAllByRole('button', { name: /Обновить/i })).toHaveLength(1);
+  });
+
+  it('401 с карточки увёл бы сеанс, а не оставил два баннера', async () => {
+    // один ответ на оба запроса: `handleUnauthorized` вызывается из `guard` до показа ошибки,
+    // поэтому экран получает сообщение `auth.session.expired` ровно в одном `role="alert"`
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => Promise.resolve(fail(401, 'token expired')));
+    renderDetail('/links/abc');
+    const alerts = await screen.findAllByRole('alert');
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]).toHaveTextContent('Сессия истекла, войдите снова.');
+    expect(mockedNavigate).toHaveBeenCalledWith(EXPIRED_REDIRECT, { replace: true });
   });
 });

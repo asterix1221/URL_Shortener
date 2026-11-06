@@ -37,53 +37,64 @@ export function ClicksChart({ byDay, lang }: Props) {
   const height = AREA_HEIGHT + LABELS_BOTTOM;
 
   return (
-    // `role="img"` с `aria-labelledby` на `<title>`: дней со столбцами у графика нет ни в таблице
-    // источников, ни в крупном счётчике, поэтому без подписанной роли скринридер не узнал бы
-    // о гистограмме ничего
-    <svg role="img" aria-labelledby={titleId} width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-      <title id={titleId}>{heading}</title>
-      {/* `fill`/`stroke` презентационными атрибутами, а не классом: `currentColor` переживает и
-          светлую, и тёмную тему, а стилей для графика в проекте нет */}
-      <line x1={AXIS_LEFT} y1={0} x2={AXIS_LEFT} y2={AREA_HEIGHT} stroke="currentColor" />
-      <line x1={AXIS_LEFT} y1={AREA_HEIGHT} x2={width} y2={AREA_HEIGHT} stroke="currentColor" />
-      {scale.ticks.map((tick) => (
-        <text
-          key={tick}
-          x={AXIS_LEFT - 4}
-          y={AREA_HEIGHT - barHeight(tick, scale.max, AREA_HEIGHT) + 3}
-          fontSize="9"
-          textAnchor="end"
-          fill="currentColor"
-        >
-          {formatCount(tick, lang)}
-        </text>
-      ))}
-      {byDay.map((day, index) => {
-        const column = barHeight(day.count, scale.max, AREA_HEIGHT);
-        return (
-          <rect
-            key={day.date}
-            className="bar"
-            x={AXIS_LEFT + BAR_GAP + index * (BAR_WIDTH + BAR_GAP)}
-            y={AREA_HEIGHT - column}
-            width={BAR_WIDTH}
-            height={column}
+    <>
+      {/* заголовок видимый, а не `<title>` внутри `svg`: подпись «По дням (UTC)» обязан читать и
+          пользователь, и скринридер, а `aria-labelledby` ссылается на этот же узел по `id`, чтобы
+          имя не пришлось дублировать вторым экземпляром текста */}
+      <h3 id={titleId}>{heading}</h3>
+      {/* `role="img"`: у столбцов по дням на этой странице нет текстового эквивалента
+          (`ReferrersTable` покрывает источники, а не дни), поэтому без подписанной роли график
+          просто исчезал бы из дерева доступных имён */}
+      <svg
+        role="img"
+        aria-labelledby={titleId}
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+      >
+        {/* `fill`/`stroke` презентационными атрибутами, а не классом: `currentColor` переживает и
+            светлую, и тёмную тему, а стилей для графика в проекте нет */}
+        <line x1={AXIS_LEFT} y1={0} x2={AXIS_LEFT} y2={AREA_HEIGHT} stroke="currentColor" />
+        <line x1={AXIS_LEFT} y1={AREA_HEIGHT} x2={width} y2={AREA_HEIGHT} stroke="currentColor" />
+        {scale.ticks.map((tick) => (
+          <text
+            key={tick}
+            x={AXIS_LEFT - 4}
+            y={AREA_HEIGHT - barHeight(tick, scale.max, AREA_HEIGHT) + 3}
+            fontSize="9"
+            textAnchor="end"
             fill="currentColor"
-          />
-        );
-      })}
-      {byDay.map((day, index) => (
-        <text
-          key={day.date}
-          x={AXIS_LEFT + BAR_GAP + index * (BAR_WIDTH + BAR_GAP) + BAR_WIDTH / 2}
-          y={AREA_HEIGHT + 10}
-          fontSize="9"
-          textAnchor="middle"
-          fill="currentColor"
-        >
-          {formatDay(day.date, lang)}
-        </text>
-      ))}
-    </svg>
+          >
+            {formatCount(tick, lang)}
+          </text>
+        ))}
+        {byDay.map((day, index) => {
+          const column = barHeight(day.count, scale.max, AREA_HEIGHT);
+          return (
+            <rect
+              key={day.date}
+              className="bar"
+              x={AXIS_LEFT + BAR_GAP + index * (BAR_WIDTH + BAR_GAP)}
+              y={AREA_HEIGHT - column}
+              width={BAR_WIDTH}
+              height={column}
+              fill="currentColor"
+            />
+          );
+        })}
+        {byDay.map((day, index) => (
+          <text
+            key={day.date}
+            x={AXIS_LEFT + BAR_GAP + index * (BAR_WIDTH + BAR_GAP) + BAR_WIDTH / 2}
+            y={AREA_HEIGHT + 10}
+            fontSize="9"
+            textAnchor="middle"
+            fill="currentColor"
+          >
+            {formatDay(day.date, lang)}
+          </text>
+        ))}
+      </svg>
+    </>
   );
 }

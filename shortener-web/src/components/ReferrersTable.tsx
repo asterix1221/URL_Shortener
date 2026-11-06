@@ -19,6 +19,10 @@ export function ReferrersTable({ referrers }: { referrers: ReferrerClicks[] }) {
 
   return (
     <table className="table-grid">
+      {/* подпись скрыта CSS (`.table-grid caption`), но даёт таблице имя в дереве доступных имён;
+          первая колонка повторяет то же слово — нового ключа задача 7 не заводит, паритет-тест
+          краснеет на асимметрии словарей */}
+      <caption>{t('detail.referrers')}</caption>
       <thead>
         <tr>
           <th scope="col">{t('detail.referrers')}</th>
