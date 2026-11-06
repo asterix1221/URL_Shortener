@@ -56,6 +56,16 @@ const bodyOf = (mock: FetchMock, method: string): unknown => {
   return call === undefined ? undefined : JSON.parse(String((call[1] as RequestInit).body));
 };
 
+// Наружу от ветки `token ?? ''` виден только заголовок: `client.ts:22` кладёт `Authorization`
+// лишь на непустом токене, поэтому отсутствие заголовка у POST/DELETE и есть проверяемое
+// следствие того, что страница дошла до вызова без токена, а не упала на нём.
+const authHeaderOf = (mock: FetchMock, method: string): string | undefined => {
+  const call = mock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === method);
+  if (call === undefined) return undefined;
+  const headers = (call[1] as RequestInit).headers as Record<string, string> | undefined;
+  return headers?.Authorization;
+};
+
 // Стор тостов живёт между тестами файла: неснятый тост ушёл бы в следующий тест, где ассерт
 // `readToasts()` проверяет уже чужой результат.
 afterEach(() => {
@@ -258,6 +268,34 @@ describe('LinksPage', () => {
     await waitFor(() => expect(mockedNavigate).toHaveBeenCalledWith(EXPIRED_REDIRECT, { replace: true }));
   });
 
+  it('без токена создание и удаление уходят без Authorization, а не со `Bearer null`', async () => {
+    const user = userEvent.setup();
+    // токен снят до рендера: `AuthProvider` читает его один раз инициализатором `useState`
+    // (`AuthProvider.tsx:23`), поэтому ветка `token ?? ''` в `submit` и `remove`
+    // (`LinksPage.tsx:80,94`) в остальных тестах файла недоступна — там `beforeEach` токен кладёт
+    sessionStorage.clear();
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(ok(pageOf([link()])))
+      .mockResolvedValueOnce(ok(link({ code: 'newcode' }), 201))
+      .mockResolvedValueOnce(ok(pageOf([link()])))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValue(ok(pageOf([])));
+    renderWithProviders(<LinksPage />, '/');
+    await user.type(screen.getByLabelText(/Длинный адрес/i), 'https://example.com');
+    await user.click(screen.getByRole('button', { name: 'Создать' }));
+    await waitFor(() => expect(bodyOf(fetchMock, 'POST')).toEqual({ url: 'https://example.com' }));
+    expect(authHeaderOf(fetchMock, 'POST')).toBeUndefined();
+
+    await user.click(await screen.findByRole('button', { name: 'Удалить abc123' }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Удалить' }));
+
+    await waitFor(() => expect(paths(fetchMock)).toHaveLength(5));
+    expect(authHeaderOf(fetchMock, 'DELETE')).toBeUndefined();
+    // отработанный вызов обязан дойти до конца: пустой токен не повод молча потерять действие
+    expect(readToasts().map((item) => item.key)).toEqual(['links.deleted']);
+    expect(await screen.findByText('Ссылок пока нет — создайте первую сверху.')).toBeInTheDocument();
+  });
+
   it('пагинация: «Вперёд» меняет страницу в URL и уходит серверу, «Назад» заблокирован', async () => {
     const user = userEvent.setup();
     const fetched = { totalElements: 42, totalPages: 3, first: true, last: false };
@@ -305,7 +343,18 @@ describe('LinksPage', () => {
     oversized.unmount();
 
     fetchMock.mockClear();
-    renderWithProviders(<LinksPage />, '/?page=abc&size=abc');
+    const junk = renderWithProviders(<LinksPage />, '/?page=abc&size=abc');
+    await waitFor(() => expect(paths(fetchMock)).toHaveLength(1));
+    expect(paths(fetchMock)[0]).toBe('/api/links?page=0&size=20');
+    junk.unmount();
+
+    // отдельные случаи на нижнюю границу: на `abc` в обеих функциях до дефолта доходит первый
+    // операнд (`Number.isInteger`), поэтому снятая целиком нижняя граница (`parsed >= 0` у
+    // `readPage`, `parsed < MIN_SIZE` у `readSize`) осталась бы неотличимой — а гейт покрытия
+    // `src/**` строчный, и V8 не различает, какой операнд `&&` дал `false`. Здесь значения
+    // целые, значит запрос уходит на `page=0&size=20` именно благодаря второй проверке
+    fetchMock.mockClear();
+    renderWithProviders(<LinksPage />, '/?page=-1&size=0');
     await waitFor(() => expect(paths(fetchMock)).toHaveLength(1));
     expect(paths(fetchMock)[0]).toBe('/api/links?page=0&size=20');
   });
