@@ -42,9 +42,11 @@ describe('ClicksChart', () => {
 
   // Проверка шага, а не наличия подписи в DOM: `getByText` нашёл бы метку и когда она залегла на
   // соседнюю. `jsdom` не считает глифы (`getBBox` не реализован), поэтому ширина метки оценивается
-  // по числу знаков: 9 px шрифт, ~5 px на знак, самая длинная метка `ru` — «03 нояб.» (8 знаков).
-  // При `BAR_GAP = 6` шаг давал бы 20 px, и тест краснеет.
-  it('шаг столбцов не уже самой широкой подписи дня', () => {
+  // по числу знаков: 9 px шрифт, ~5 px на знак. Оценка заведомо щедрой — самый широкий `ru`-день
+  // («03 февр.»/«03 нояб.», 8 знаков) при тех же опциях `Intl` выходит ~35–37 px, поэтому 40 px
+  // шага хватает с запасом. Сравниваются x самих подписей, а не столбцов: метка центрирована по
+  // столбцу, и именно расстояние между метками решает, налезут ли они друг на друга.
+  it('шаг подписей дня не уже самой широкой метки', () => {
     render(
       <ClicksChart
         byDay={[
@@ -55,12 +57,16 @@ describe('ClicksChart', () => {
         lang="ru"
       />
     );
-    const bars = [...document.querySelectorAll('rect.bar')].map((bar) => Number(bar.getAttribute('x')));
-    const labels = [...document.querySelectorAll('svg text')].filter((node) =>
-      node.getAttribute('text-anchor') === 'middle'
+    const bars = document.querySelectorAll('rect.bar');
+    const labels = [...document.querySelectorAll('svg text')].filter(
+      (node) => node.getAttribute('text-anchor') === 'middle'
     );
+    // метка на каждый день: прореживания здесь нет, и проверка длины обязана предшествовать
+    // сравнению, иначе `Math.max` по пустому списку дал бы `-Infinity` и тест прошёл бы вакуумно
+    expect(labels).toHaveLength(bars.length);
+    const centers = labels.map((node) => Number(node.getAttribute('x')));
     const widest = Math.max(...labels.map((node) => (node.textContent ?? '').length)) * 5;
-    expect(bars[1] - bars[0]).toBeGreaterThanOrEqual(widest);
-    expect(bars[2] - bars[1]).toBeGreaterThanOrEqual(widest);
+    expect(centers[1] - centers[0]).toBeGreaterThanOrEqual(widest);
+    expect(centers[2] - centers[1]).toBeGreaterThanOrEqual(widest);
   });
 });

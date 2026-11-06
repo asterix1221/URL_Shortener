@@ -49,7 +49,7 @@ const ok = (body: unknown): Response =>
 const fail = (status: number, message: string): Response =>
   new Response(`{"status":${status},"message":${JSON.stringify(message)}}`, { status });
 
-// Ответ отдаётся фабрикой, а не готовым `Response`: тело читается один раз (`client.ts:47`), и
+// Ответ отдаётся фабрикой, а не готовым `Response`: тело читается один раз (`client.ts:9`), и
 // второй запрос к одному экземпляру дошёл бы до `catch` как «связь не установлена».
 const mockByPath = (statsResponse: () => Response, cardResponse: () => Response): void => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) =>
