@@ -290,6 +290,10 @@ describe('LinksPage', () => {
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Удалить' }));
 
     await waitFor(() => expect(paths(fetchMock)).toHaveLength(5));
+    // запрос удаления обязан существовать, иначе следующая строка была бы проходной по пустоте:
+    // `authHeaderOf` отдаёт `undefined` и для вызова, которого нет
+    expect(paths(fetchMock)[3]).toBe('/api/links/abc123');
+    expect((fetchMock.mock.calls[3]?.[1] as RequestInit).method).toBe('DELETE');
     expect(authHeaderOf(fetchMock, 'DELETE')).toBeUndefined();
     // отработанный вызов обязан дойти до конца: пустой токен не повод молча потерять действие
     expect(readToasts().map((item) => item.key)).toEqual(['links.deleted']);
@@ -335,7 +339,7 @@ describe('LinksPage', () => {
     expect(screen.getByText('Страница по 50')).toBeInTheDocument();
   });
 
-  it('размер страницы берётся из URL и не выходит за потолок сервера', async () => {
+  it('параметры страницы из URL урезаются до границ сервера с обеих сторон', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(ok(pageOf([link()])));
     const oversized = renderWithProviders(<LinksPage />, '/?page=2&size=500');
     await waitFor(() => expect(paths(fetchMock)).toHaveLength(1));
