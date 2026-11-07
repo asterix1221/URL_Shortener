@@ -5,11 +5,11 @@ import { saveToken } from './lib/session';
 import { BASE, renderApp } from './test/render';
 
 // Собранное `<App/>` под тестами 2 и 5 монтирует настоящие экраны, а они при монтировании спрашивают
-// API: `LinksPage` — `/api/links?page=…`, `LinkDetailPage` — карточку и `/stats`. Без стаби запрос
+// API: `LinksPage` — `/api/links?page=…`, `LinkDetailPage` — карточку и `/stats`. Без стаба запрос
 // ушёл бы в сеть (`globalThis.fetch` здесь настоящий), слой вернул бы `status: 0`, и экран
 // встретил бы тест состоянием ошибки. Стаб обязан разбирать url, а не отдавать одно тело всем:
-// страница списка и карточка ждут разные формы, и второй тест на голубом теле упал бы не из-за
-// гарда, а из-за парсинга.
+// страница списка и карточка ждут разные формы, и тест 5 на одном теле для всех запросов падал бы
+// не из-за сломанного гарда, а из-за несовпавшей формы ответа.
 const CARD: LinkResponse = {
   code: 'abc',
   shortUrl: 'http://localhost:28080/a/abc',
@@ -41,7 +41,7 @@ const json = (body: unknown): Response =>
   new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
 
 // Ответ отдаётся функцией, а не готовым экземпляром: тело `Response` читается один раз
-// (`client.ts:9`), и второй запрос к одному и тому же объекту дошёл бы до `catch`.
+// (`client.ts:38`), и второй запрос к одному и тому же объекту дошёл бы до `catch`.
 beforeEach(() => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
     const url = String(input);
@@ -66,7 +66,7 @@ it('с токеном вход уводит в список', async () => {
   // ассерт на ФОРМЕ, а не на таблице: `<LinkForm/>` остаётся на странице во всех трёх состояниях
   // списка, поэтому сам гард не зависит от ответа мока (`LinksPage.tsx:116`)
   expect(screen.getByRole('button', { name: /Создать$/ })).toBeInTheDocument();
-  // а этот — ждёт готового состояния и делает стабиль нагружаемым: без него строки нет, тест
+  // а этот — ждёт готового состояния и делает стаб нагружаемым: без него строки нет, тест
   // падал бы на таймауте `findBy`, а не проходил молча
   expect(await screen.findByRole('link', { name: 'abc' })).toBeInTheDocument();
 });

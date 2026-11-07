@@ -7,9 +7,9 @@ import { I18nProvider } from './i18n/I18nProvider';
 import './styles/tokens.css';
 import './styles/base.css';
 
-// `basename` берётся из конфига сборки единственным местом: `base` задан и в `vite.config.ts`, и в
-// `vitest.config.ts`, поэтому `/app/` в href ссылок и в редиректах гардов приходит оттуда, а не
-// продублирован в коде строкой.
+// `basename` приходит из конфига сборки и только оттуда: `base` задан и в `vite.config.ts`, и в
+// `vitest.config.ts`, поэтому `/app/` в href ссылок и в редиректах гардов не продублирован в коде
+// строкой.
 //
 // `AuthProvider` стоит ВНУТРИ роутера, а не снаружи: он зовёт `useNavigate` (`AuthProvider.tsx:14`)
 // на каждом рендере, и вне контекста роутера этот хук бросает — страница была бы белой ещё до
