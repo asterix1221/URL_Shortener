@@ -7,12 +7,14 @@ import { I18nProvider } from './i18n/I18nProvider';
 import './styles/tokens.css';
 import './styles/base.css';
 
-// `basename` читается из конфига сборки единственном месте: `base` задан и в `vite.config.ts`,
-// и в `vitest.config.ts`, поэтому `/app/` в href ссылок и в редиректах гардов приходит оттуда,
-// а не продублирован в коде строк.
+// `basename` берётся из конфига сборки единственным местом: `base` задан и в `vite.config.ts`, и в
+// `vitest.config.ts`, поэтому `/app/` в href ссылок и в редиректах гардов приходит оттуда, а не
+// продублирован в коде строкой.
 //
-// `AuthProvider` стоит ВНУТРИ роутера, а не снаружи: он зовёт `useNavigate` (гард 401 в
-// `handleUnauthorized`), и вне контекста роутера этот хук бросает на первом же рендере.
+// `AuthProvider` стоит ВНУТРИ роутера, а не снаружи: он зовёт `useNavigate` (`AuthProvider.tsx:14`)
+// на каждом рендере, и вне контекста роутера этот хук бросает — страница была бы белой ещё до
+// первого запроса. Ловушка тем опаснее, что `main.tsx` исключён из замера покрытия, так что ни
+// один тест этот порядок не проверяет.
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <I18nProvider>

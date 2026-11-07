@@ -30,8 +30,11 @@ export function renderWithProviders(ui: ReactElement, path = '/'): RenderResult 
   return render(<WithProviders path={path}>{ui}</WithProviders>);
 }
 
-// Стек провайдеров здесь тот же, что в `main.tsx`, поэтому `App` монтируется собранным: тесты
-// задачи 13 проверяют таблицу маршрутов и гарды, а не отдельную страницу.
+// Стек провайдеров здесь тот же порядок, что в `main.tsx` (i18n → роутер → auth), но без
+// `StrictMode`: двойной вызов эффектов удвоил бы счётчик запросов там, где тест считает его
+// (`LinkDetailPage.test.tsx` проверяет, что обновление повторяет только `/stats`). `App`
+// монтируется собранным, поэтому тесты задачи 13 проверяют таблицу маршрутов и гарды, а не
+// отдельную страницу.
 export function renderApp(path: string): RenderResult {
   return renderWithProviders(<App />, path);
 }
