@@ -1,6 +1,7 @@
 import { render, type RenderResult } from '@testing-library/react';
 import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
+import App from '../App';
 import { AuthProvider } from '../auth/AuthProvider';
 import { I18nProvider } from '../i18n/I18nProvider';
 
@@ -27,6 +28,12 @@ function WithProviders({ children, path }: { children: ReactNode; path: string }
 
 export function renderWithProviders(ui: ReactElement, path = '/'): RenderResult {
   return render(<WithProviders path={path}>{ui}</WithProviders>);
+}
+
+// Стек провайдеров здесь тот же, что в `main.tsx`, поэтому `App` монтируется собранным: тесты
+// задачи 13 проверяют таблицу маршрутов и гарды, а не отдельную страницу.
+export function renderApp(path: string): RenderResult {
+  return renderWithProviders(<App />, path);
 }
 
 // renderHook принимает только children, поэтому отдельная обёртка без ui-слота. path нужен
