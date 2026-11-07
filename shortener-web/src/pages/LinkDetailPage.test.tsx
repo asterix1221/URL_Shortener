@@ -124,6 +124,14 @@ describe('LinkDetailPage', () => {
     expect(screen.getByText(/статистика догоняет/i)).toBeInTheDocument();
     expect(screen.getByText('https://example.com/long')).toBeInTheDocument();
 
+    // спека (строка 152) обещает действие «открыть в новой вкладке», а словарь `links.open` до этой
+    // правки нигде не вызывался. `rel="noopener"` — не косметика: без него новая вкладка держит
+    // `window.opener` и может переписать адрес родительской.
+    const open = screen.getByRole('link', { name: /Открыть/i });
+    expect(open).toHaveAttribute('href', LINK.shortUrl);
+    expect(open).toHaveAttribute('target', '_blank');
+    expect(open).toHaveAttribute('rel', 'noopener');
+
     const table = screen.getByRole('table');
     expect(within(table).getAllByRole('row')).toHaveLength(3);
     expect(within(table).getByText('https://news.example')).toBeInTheDocument();

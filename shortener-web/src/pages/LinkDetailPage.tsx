@@ -74,6 +74,14 @@ export default function LinkDetailPage() {
             <dt>{t('detail.short')}</dt>
             <dd>
               <span title={card.data.shortUrl}>{card.data.shortUrl}</span>
+              {/* «Открыть в новой вкладке» (спека, строка 152): ключ `links.open` жил в обоих
+                  словарях, но ни одна задача его не подключала. Аффорданс добавлен к карточке, а не
+                  к строке списка: та под контрактом «одна ссылка на строку, имя — ровно код»
+                  (`LinksTable.tsx:26`, ищет e2e задачи 15). `rel="noopener"` отсекает
+                  `window.opener` у новой вкладки. */}
+              <a href={card.data.shortUrl} target="_blank" rel="noopener">
+                {t('links.open')}
+              </a>
               {/* копирование переиспользует `CopyButton`: имя кнопки — `links.copy` + код, его же
                   ищет сценарий `stats.spec.ts` */}
               <CopyButton shortUrl={card.data.shortUrl} code={card.data.code} />
