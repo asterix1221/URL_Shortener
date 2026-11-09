@@ -94,13 +94,15 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
    отчёт покрытия.
 2. `docker build -t shortener-service:ci-<номер>` и `docker compose build gateway` — теги
    попадают в compose (`image: shortener-service:${APP_IMAGE_TAG}` у сервиса `app` и
-   `shortener-gateway:${APP_IMAGE_TAG}` в оверлее), поэтому стек поднимает ровно те образы,
-   которые были собраны и названы в этой сборке, а не копию `shortener-ci-app` или образ
-   с прошлой сборки.
-3. `docker compose -f infra/docker-compose.yml -f infra/docker-compose.ci.yml up -d` в
-   отдельном проекте `shortener-ci` и на своих хост-портах (28180/5442/6389/29092), чтобы не
-   пересекаться с рабочей копией стека. Секреты стенда (`POSTGRES_PASSWORD`, `JWT_SECRET`,
-   `IP_SALT`) генерируются `openssl rand` на одну сборку и не хранятся в репозитории.
+   `shortener-gateway:${APP_IMAGE_TAG}` у сервиса `gateway` базового файла), поэтому стек
+   поднимает ровно те образы, которые были собраны и названы в этой сборке, а не копию
+   `shortener-ci-app` или образ с прошлой сборки. Образ gateway собирает `infra/web.Dockerfile`
+   из контекста-корня репозитория: внутри и конфигурация nginx, и бандл интерфейса
+   (`npx vite build` в `shortener-web`), поэтому CI поднимает тот же вход, что и разработка.
+3. `docker compose -f infra/docker-compose.yml up -d` в отдельном проекте `shortener-ci` и на
+   своих хост-портах (28180/5442/6389/29092), чтобы не пересекаться с рабочей копией стека.
+   Секреты стенда (`POSTGRES_PASSWORD`, `JWT_SECRET`, `IP_SALT`) генерируются `openssl rand`
+   на одну сборку и не хранятся в репозитории.
 4. Ожидание `GET /actuator/health` через `host.docker.internal` (60 попыток по 2 с); при
    таймауте в лог сборки кладутся `compose ps` и `logs --tail=120 app gateway`.
 5. `mvn -B test -DbaseUrl=…` в `shortener-autotests` — автотесты идут через gateway nginx,
@@ -131,15 +133,26 @@ flags=MS_BIND|MS_REC: not a directory: Are you trying to mount a directory onto 
 отсюда «mount a directory onto a file». Клиент `docker compose` внутри job'а файл видел —
 поэтому ошибка и выглядела как «файл есть, но смонтировать не выходит».
 
-Решение — оверлей `infra/docker-compose.ci.yml`: `volumes: !reset []` затирает список
-монтирований целиком (без `!reset` compose дописал бы его к базовому файлу, и ошибка осталась
-бы), а `image:` и `build:` переводят `gateway` на `shortener-gateway:${APP_IMAGE_TAG}`,
-который собирается из `infra/nginx/Dockerfile` — конфигурация запечена внутрь образа. Контекст
-сборки так не ломается: его клиент `docker compose` читает сам и передаёт демону потоком.
+Решение, которым дефект закрыт сейчас, — образ вместо монтирования в базовом
+`infra/docker-compose.yml`: `gateway` собирается из `infra/web.Dockerfile` (контекст — корень
+репозитория) и получает тег `shortener-gateway:${APP_IMAGE_TAG:-dev}`, а `volumes:` у сервиса
+больше нет. Конфигурация nginx и бандл интерфейса запечены внутрь образа, поэтому один и тот же
+артефакт поднимают и разработка, и CI, и `!reset` не нужен: затирать нечего. Контекст сборки так
+не ломается: его клиент `docker compose` читает сам и передаёт демону потоком — в отличие от
+bind-пути, который резолвит демон.
 
-Разработческий стек (базовый файл) монтирование сохраняет: править `nginx.conf` там можно без
-пересборки образа, а `docker compose up` запускается из репозитория на хосте, где путь
-однозначно разрешим.
+Промежуточным решением был оверлей `infra/docker-compose.ci.yml` с `volumes: !reset []`
+(без `!reset` compose дописал бы монтирование к списку базового файла, и ошибка осталась бы) и
+отдельным `infra/nginx/Dockerfile`, запекавшим одну конфигурацию. Оба файла удалены: они держали
+две копии gateway — монтируемую в разработке и собранную в CI, — то есть ровно то расхождение,
+из-за которого дефект вообще дожил до сборки №2. Текст выше сохранён как описание причины,
+а не как инструкция.
+
+Разработческий цикл правок бандла без пересборки образа даёт `infra/docker-compose.dev.yml`:
+он монтирует `../shortener-web/dist` поверх `/usr/share/nginx/html/app`. Это монтирование
+запускается только с хоста, где путь однозначно разрешим; в DooD его не используют — там
+`npm run build` и пересборка образа. Монтирование `nginx.conf` не возвращается нигде: правка
+конфигурации теперь требует `docker compose build gateway`.
 
 ### Почему всё через `host.docker.internal`
 

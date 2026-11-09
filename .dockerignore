@@ -1,0 +1,15 @@
+.git
+.github
+.superpowers
+docs
+PLAN.md
+CLAUDE.md
+infra/.env
+**/target/
+**/node_modules/
+shortener-web/dist
+shortener-web/coverage
+shortener-web/playwright-report
+shortener-web/test-results
+**/*.jfr
+*.log

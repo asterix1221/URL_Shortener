@@ -34,11 +34,6 @@ pipeline {
         TESTCONTAINERS_HOST_OVERRIDE = 'host.docker.internal'
 
         COMPOSE_FILE = 'infra/docker-compose.yml'
-        // Оверлей CI-стенда: gateway с запечённой конфигурацией вместо bind-монтирования.
-        // Демон резолвит относительные пути монтирований в своей файловой системе, а workspace
-        // с репозиторием есть только внутри контейнера Jenkins, поэтому базовый файл в CI
-        // непроходим (подробности — в комментарии infra/docker-compose.ci.yml).
-        COMPOSE_FILE_CI = 'infra/docker-compose.ci.yml'
         ENV_FILE = 'infra/.env'
 
         // Теги образов, которые пайплайн собирает и которые затем встают в стек: сервисы app и
@@ -86,11 +81,12 @@ pipeline {
                 sh 'docker build -t shortener-service:${APP_IMAGE_TAG} shortener-service'
                 sh 'docker image inspect shortener-service:${APP_IMAGE_TAG} --format "size={{.Size}} bytes"'
 
-                // Gateway — конфиг внутри образа: его сборочный контекст клиент compose читает
-                // сам и отдаёт демону потоком, поэтому путь из workspace доезжает до сборки.
+                // Gateway — конфиг и бандл интерфейса внутри образа: его сборочный контекст
+                // (корень репозитория) клиент compose читает сам и отдаёт демону потоком,
+                // поэтому путь из workspace доезжает до сборки.
                 // Здесь ещё нет --env-file: infra/.env генерируется следующим этапом, а тег
                 // берётся из окружения job'а (${APP_IMAGE_TAG} подставляется при интерполяции).
-                sh 'docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" build gateway'
+                sh 'docker compose -f "${COMPOSE_FILE}" build gateway'
                 sh 'docker image inspect shortener-gateway:${APP_IMAGE_TAG} --format "size={{.Size}} bytes"'
             }
         }
@@ -116,9 +112,9 @@ pipeline {
 
                     # Без --build: образ уже собран предыдущим этапом под тегом ${APP_IMAGE_TAG},
                     # и стек должен поднять именно его, а не пересобранную копию.
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" \
+                    docker compose -f "${COMPOSE_FILE}" \
                         --env-file "${ENV_FILE}" up -d
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" \
+                    docker compose -f "${COMPOSE_FILE}" \
                         --env-file "${ENV_FILE}" images app gateway
                 '''
             }
@@ -135,8 +131,8 @@ pipeline {
                         sleep 2
                     done
                     echo "gateway не отдал /actuator/health за 120 с"
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" --env-file "${ENV_FILE}" ps
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" --env-file "${ENV_FILE}" logs --tail=120 app gateway
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" ps
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" logs --tail=120 app gateway
                     exit 1
                 '''
             }
@@ -161,7 +157,7 @@ pipeline {
                              allowEmptyArchive: true
             // -v удаляет и том с данными, чтобы следующий прогон начинался с чистой базы
             // и применённых заново миграций.
-            sh 'docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" --env-file "${ENV_FILE}" down -v || true'
+            sh 'docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" down -v || true'
             // Образы сборки удаляются по именам, а не `down --rmi local`: у --rmi local нет
             // фильтра по тегу и он заодно снёс бы shortener-jenkins:local, то есть пересборку
             // 71 запиненного плагина на следующем прогоне.
