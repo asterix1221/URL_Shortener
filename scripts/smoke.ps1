@@ -48,8 +48,8 @@ if ($app.StatusCode -ne 200 -or "$($app.Headers['Content-Type'])" -notmatch 'tex
 if (-not $app.Headers['Content-Security-Policy']) { throw "У /app/ нет Content-Security-Policy" }
 
 $index = Invoke-WebRequest "$base/app/index.html" -SkipHttpErrorCheck
-if ("$($index.Headers['Cache-Control'])" -notmatch 'no-store') {
-    throw "GET /app/index.html отдал Cache-Control '$($index.Headers['Cache-Control'])', ждали no-store"
+if ($index.StatusCode -ne 200 -or "$($index.Headers['Cache-Control'])" -notmatch 'no-store') {
+    throw "GET /app/index.html вернул $($index.StatusCode) с Cache-Control '$($index.Headers['Cache-Control'])', ждали 200 no-store"
 }
 
 # путь берём из самого HTML, а не из каталога: имя файла содержит хэш сборки
@@ -69,4 +69,10 @@ $root = Invoke-WebRequest "$base/" -MaximumRedirection 0 -SkipHttpErrorCheck -Er
 if ($root.StatusCode -ne 302 -or "$($root.Headers.Location)" -ne '/app/') {
     throw "GET / вернул $($root.StatusCode) с Location '$($root.Headers.Location)', ждали 302 /app/"
 }
-"UI: /app/ 200 text/html, index no-store, $asset immutable, / -> 302 /app/"
+
+# адрес входа без завершающего слэша: иначе он уезжает в API как зарезервированный код `app`
+$appBare = Invoke-WebRequest "$base/app" -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
+if ($appBare.StatusCode -ne 302 -or "$($appBare.Headers.Location)" -ne '/app/') {
+    throw "GET /app вернул $($appBare.StatusCode) с Location '$($appBare.Headers.Location)', ждали 302 /app/"
+}
+"UI: /app/ 200 text/html, index no-store, $asset immutable, / и /app -> 302 /app/"
