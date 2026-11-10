@@ -1,13 +1,14 @@
 import { expect, test } from '@playwright/test';
-import { createLink, registerAndSignIn } from './support';
+import { createLink, registerAndSignIn, uniqueAlias } from './support';
 
 test('третья ссылка за минуту: баннер, отсчёт и заблокированная кнопка', async ({ page }) => {
   await registerAndSignIn(page);
-  await createLink(page, 'https://example.com/a', 'ui-rate-1');
-  await createLink(page, 'https://example.com/b', 'ui-rate-2');
+  const alias = uniqueAlias('ui-rate');
+  await createLink(page, 'https://example.com/a', `${alias}-1`);
+  await createLink(page, 'https://example.com/b', `${alias}-2`);
   const response = page.waitForResponse((r) => r.url().endsWith('/api/links') && r.status() === 429);
   await page.getByLabel('Длинный адрес').fill('https://example.com/c');
-  await page.getByLabel('Свой код (необязательно)').fill('ui-rate-3');
+  await page.getByLabel('Свой код (необязательно)').fill(`${alias}-3`);
   await page.getByRole('button', { name: 'Создать' }).click();
   const retryAfter = Number((await response).headers()['retry-after']);
   await expect(page.getByText('Слишком часто: лимит на создание ссылок в минуту')).toBeVisible();

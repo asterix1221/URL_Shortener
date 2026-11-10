@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { startTransition, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { login, register } from '../api/auth';
 import type { ApiResult, AuthResponse } from '../api/types';
@@ -50,9 +50,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // e2e задачи 15. `status: 0`, 500 и 429 к истёкшему сеансу не относятся: токен остаётся,
   // страница показывает свою ошибку (контракт `AuthValue.handleUnauthorized`).
   const handleUnauthorized = useCallback(() => {
+    // Хранилище обязано очиститься сразу, а не когда React дойдёт до transition.
     clearToken();
-    setToken(null);
-    navigateRef.current(EXPIRED_REDIRECT, { replace: true });
+    // Гонка: срочный setToken(null) рендерит гард RequireAuth на СТАРОМ маршруте, и его
+    // <Navigate to="/login"> перезатирает transition-навигацию (history в react-router 7
+    // слушается через startTransition), теряя флаг ?expired=1.
+    startTransition(() => {
+      setToken(null);
+      navigateRef.current(EXPIRED_REDIRECT, { replace: true });
+    });
   }, []);
 
   const value = useMemo<AuthValue>(

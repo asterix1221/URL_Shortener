@@ -7,6 +7,7 @@ import { listLinks } from '../api/links';
 import type { ApiResult, AuthResponse } from '../api/types';
 import { loadToken, saveToken } from '../lib/session';
 import { AuthProviderWrapper, renderWithProviders } from '../test/render';
+import { RequireAuth } from './RequireAuth';
 import { useAuth } from './useAuth';
 
 function LocationMarker() {
@@ -39,6 +40,22 @@ function RefreshProbe() {
         <Route path="/login" element={<LocationMarker />} />
       </Routes>
     </>
+  );
+}
+
+// Проба под гардом — среда дефекта из e2e/session.spec.ts: срочный рендер с token=null на
+// СТАРОМ маршруте монтирует RequireAuth, и его Navigate конкурирует с transition-редиректом.
+function GuardedProbe() {
+  const { token, handleUnauthorized } = useAuth();
+  return (
+    <button
+      onClick={async () => {
+        const outcome = await listLinks(0, 20, token ?? '');
+        if (!outcome.ok && outcome.error.status === 401) handleUnauthorized();
+      }}
+    >
+      refresh
+    </button>
   );
 }
 
@@ -75,6 +92,31 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('loc').textContent).toBe('/login?expired=1'));
     expect(screen.getByTestId('token')).toHaveTextContent('none');
     expect(screen.getByTestId('status')).toHaveTextContent('401');
+    expect(loadToken()).toBeNull();
+  });
+
+  it('401 под гардом сохраняет флаг expired, а не голый /login (гонка гарда и transition)', async () => {
+    // Среда e2e-дефекта: маршрут закрыт RequireAuth. До правки срочный `setToken(null)`
+    // рендерит гард на СТАРОМ адресе, его `<Navigate to="/login">` перезатирает transition-
+    // редирект и флаг теряется. Контракт спеки — адрес `/login?expired=1` (читает LoginPage).
+    saveToken('STALE');
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() =>
+      Promise.resolve(new Response('{"status":401}', { status: 401 }))
+    );
+    renderWithProviders(
+      <>
+        <Routes>
+          <Route path="/links" element={<RequireAuth><GuardedProbe /></RequireAuth>} />
+          <Route path="/login" element={<span>login</span>} />
+        </Routes>
+        <LocationMarker />
+      </>,
+      '/links'
+    );
+
+    await userEvent.click(screen.getByRole('button', { name: 'refresh' }));
+
+    await waitFor(() => expect(screen.getByTestId('loc').textContent).toBe('/login?expired=1'));
     expect(loadToken()).toBeNull();
   });
 
