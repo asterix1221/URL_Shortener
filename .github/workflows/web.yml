@@ -76,3 +76,10 @@ jobs:
         with:
           name: playwright-report
           path: shortener-web/playwright-report
+      # порядок важен: сначала артефакт и логи, потом снос — после `down -v` доставать нечего
+      - name: Логи стека при падении
+        if: failure()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env logs --tail=200 app gateway
+      - name: Снос стека
+        if: always()
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env down -v
