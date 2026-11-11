@@ -249,7 +249,7 @@ shortener-service\target docs\coverage.json`.
 | Тело запроса | POST с телом ~30 КБ → 413 ещё до сервиса (`client_max_body_size 16k`) |
 | Health | `GET /actuator/health` → `{"status":"UP"}`, `GET /gateway-health` → `ok` (healthcheck контейнера) |
 | OpenAPI через прокси | `/v3/api-docs` → `servers[0].url = http://localhost:28080` |
-| `scripts/smoke.ps1 -BaseUrl http://localhost:28380` (стенд `-p s9doc`, `APP_IMAGE_TAG=s9web`, прогон Task 17) | `UI: /app/ 200 text/html, index no-store, /app/assets/index-bSFJqMaU.js immutable, / и /app -> 302 /app/`, код выхода 0. UI-часть проверяет, а не только печатает: CSP у `/app/`, `no-store` у index, `immutable` у бандла (путь с хешем вынут из самого HTML), 302 на `/app/` с `/` и `/app` — при любом отклонении `throw` |
+| `scripts/smoke.ps1 -BaseUrl http://localhost:28380` (стенд `-p s9fix`, `APP_IMAGE_TAG=s9web`, прогон фикс-раунда финального ревью) | `UI: /app/ 200 text/html, index no-store, /app/assets/index-BuuxQOqv.js max-age=31536000 immutable, / и /app -> 302 /app/`, код выхода 0. UI-часть проверяет, а не только печатает: CSP у `/app/`, `no-store` у index, `max-age=31536000` **и** `immutable` у бандла (две подстроки одного `Cache-Control`; путь с хешем вынут из самого HTML), 302 на `/app/` с `/` и `/app` — при любом отклонении `throw`. Отдельный замер заголовка: `curl -sI …/app/assets/index-BuuxQOqv.js` даёт ровно одну строку `Cache-Control: public, max-age=31536000, immutable`. Прежний прогон Task 17 (стенд `-p s9doc`, хеш `index-bSFJqMaU.js`, проверка только `immutable`) — источник прежних чисел, не этого |
 
 Разбор двух мест, где прокси меняет поведение приложения:
 
@@ -301,7 +301,9 @@ API-автотестов этапа 4 (REST Assured): те закрепляют 
 
 Прогон: стенд поднимается снаружи compose-файлом, `webServer` в конфиге сознательно нет; адрес —
 `E2E_BASE_URL` (дефолт `http://localhost:28380`, в `web.yml` — `http://localhost:8080`), команда —
-`npx playwright test --workers=1` из `shortener-web`. Последний прогон фикс-раунда Task 15:
+`npx playwright test --workers=1` из `shortener-web`. Прогон фикс-раунда финального ревью
+(стенд `-p s9fix`, `APP_IMAGE_TAG=s9web`, порт 28380): **6 passed (9.9 с)**, `Running 6 tests
+using 1 worker`, код выхода 0 (`logs-fix/05-e2e.log`). Прежний прогон фикс-раунда Task 15:
 **6 passed (13.2 с)**, повтор подряд без сброса тома — **6 passed (7.6 с)**
-(`task-15-fix-1-report.md`). Это локальные прогоны: веб-стадии CI написаны, но не исполнены
-(см. «CI/CD» в README).
+(`task-15-fix-1-report.md`) — эти числа остаются со своим источником. Это локальные прогоны:
+веб-стадии CI написаны, но не исполнены (см. «CI/CD» в README).
