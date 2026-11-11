@@ -56,8 +56,11 @@ if ($index.StatusCode -ne 200 -or "$($index.Headers['Cache-Control'])" -notmatch
 $asset = [regex]::Match($app.Content, '/app/assets/[A-Za-z0-9._-]+\.js').Value
 if (-not $asset) { throw "В /app/ не найден путь к /app/assets/*.js — бандл не на месте" }
 $js = Invoke-WebRequest "$base$asset" -SkipHttpErrorCheck
-if ($js.StatusCode -ne 200 -or "$($js.Headers['Cache-Control'])" -notmatch 'immutable') {
-    throw "$asset вернул $($js.StatusCode) с Cache-Control '$($js.Headers['Cache-Control'])', ждали 200 immutable"
+# срок свежести и неизменяемость — две подстроки одного Cache-Control: без max-age=31536000
+# браузер пользуется эвристикой RFC 7234, и «immutable» защищает нечего (спека §3.3, находка I-1)
+$assetCache = "$($js.Headers['Cache-Control'])"
+if ($js.StatusCode -ne 200 -or $assetCache -notmatch 'max-age=31536000' -or $assetCache -notmatch 'immutable') {
+    throw "$asset вернул $($js.StatusCode) с Cache-Control '$assetCache', ждали 200 public, max-age=31536000, immutable"
 }
 
 # корень больше не принадлежит приложению
@@ -75,4 +78,4 @@ $appBare = Invoke-WebRequest "$base/app" -MaximumRedirection 0 -SkipHttpErrorChe
 if ($appBare.StatusCode -ne 302 -or "$($appBare.Headers.Location)" -ne '/app/') {
     throw "GET /app вернул $($appBare.StatusCode) с Location '$($appBare.Headers.Location)', ждали 302 /app/"
 }
-"UI: /app/ 200 text/html, index no-store, $asset immutable, / и /app -> 302 /app/"
+"UI: /app/ 200 text/html, index no-store, $asset max-age=31536000 immutable, / и /app -> 302 /app/"
