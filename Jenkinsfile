@@ -166,6 +166,11 @@ pipeline {
                     # Отчёт прошлого прогона не должен попасть в артефакты этого: workspace между
                     # сборками не чистится, а каталог gitignored (.gitignore:28).
                     rm -rf shortener-web/playwright-report
+                    # Имя контейнера глобальное на хосте, не в пространстве имён compose-проекта:
+                    # прерванный предыдущий job оставляет «протёкший» web-e2e, а `docker cp` в
+                    # post { always } выполняется на любом пути — без предочистки здесь в артефакты
+                    # попал бы чужой старый отчёт, если первый шаг упал до создания контейнера.
+                    docker rm -f web-e2e || true
                     # 429-сценарию нужен лимит 2 на пользователя. Автотесты этапа 4 отработали
                     # под 1000, теперь пересоздаём app с оверрайдом из shell-окружения.
                     RATE_LIMIT_CREATE_PER_MINUTE=2 docker compose -f "${COMPOSE_FILE}" \\
@@ -189,10 +194,7 @@ pipeline {
                     curl -sf "${BASE_URL}/app/" >/dev/null            # бандл на месте: 200 из gateway
                     docker build -f shortener-web/Dockerfile --target e2e \\
                         -t shortener-web-e2e:${APP_IMAGE_TAG} shortener-web
-                    # Имя контейнера глобальное на хосте, не в пространстве имён compose-проекта:
-                    # прерванный предыдущий job оставляет его, и без очистки docker create падает
-                    # на коллизии имени в каждом следующем прогоне.
-                    docker rm -f web-e2e || true
+                    # Имя контейнера уже очищено первым шагом: между шагами его никто не создаёт.
                     docker create --name web-e2e --add-host=host.docker.internal:host-gateway \\
                         -e E2E_BASE_URL=${BASE_URL} shortener-web-e2e:${APP_IMAGE_TAG}
                     # sh в Jenkins идёт с -e: голый `docker start -a …; rc=$?` оборвал бы скрипт
