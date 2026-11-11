@@ -119,25 +119,42 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
    таймауте в лог сборки кладутся `compose ps` и `logs --tail=120 app gateway`.
 6. `mvn -B test -DbaseUrl=…` в `shortener-autotests` — автотесты идут через gateway nginx,
    то же самое зеркало, что и у ручной проверки.
-7. `Интерфейс: e2e` — после API-автотестов, против того же уже поднятого стека. Сначала
+7. `Интерфейс: e2e` — после API-автотестов, против того же уже поднятого стека. Стадия разбита на
+   два `sh`-шага: первый пересоздаёт app и держит гейт здоровья, второй собирает e2e-образ и
+   гоняет тесты. Разбиение обязательно: внутри одного скрипта `exit 0` из цикла ожидания завершил
+   бы весь шаг и пропустил сборку с прогоном. Первая строка стадии —
+   `rm -rf shortener-web/playwright-report`: workspace между сборками не чистится, а каталог
+   gitignored (`.gitignore:28`), поэтому без очистки `archiveArtifacts` положил бы в артефакты
+   текущего job'а отчёт предыдущего. Дальше
    `RATE_LIMIT_CREATE_PER_MINUTE=2 docker compose … up -d app`: сценарию `ratelimit.spec.ts`
    нужен лимит 2 на пользователя, а автотесты шага 6 отработали под 1000 из `CI_RATE_LIMIT`.
    Образ при этом не пересобирается — тег остаётся `ci-<номер>`, меняется только окружение
-   контейнера. Дальше тот же пробер `/actuator/health` (60 попыток по 2 с), что и на шаге 5:
+   контейнера. Затем тот же пробник `/actuator/health` (60 попыток по 2 с), что и на шаге 5:
    `/app/` отдаёт nginx из образа сразу, тогда как перезапущенный Spring ещё не принимает
-   `/api`, и первый `page.goto()` поймал бы 502; затем `curl -sf "${BASE_URL}/app/"` — бандл
-   на месте. Сборка `docker build -f shortener-web/Dockerfile --target e2e
-   -t shortener-web-e2e:ci-<номер> shortener-web` (база `mcr.microsoft.com/playwright:v1.49.1-noble`,
-   браузеры уже внутри образа, `npx playwright install` в job не нужен), `docker create --name
-   web-e2e --add-host=host.docker.internal:host-gateway -e E2E_BASE_URL=${BASE_URL}` и
-   `docker start -a web-e2e`. `E2E_BASE_URL` обязателен: `playwright.config.ts` берёт
-   процесс-переменную, а её дефолт — `http://localhost:28380`, локальный стенд задачи 14,
-   недоступный из job'а. Отчёт забирается `docker cp web-e2e:/web/playwright-report
-   shortener-web/` до `docker rm -f web-e2e`: bind-монтирование workspace в DooD не работает
-   (раздел ниже). Код возврата `docker start` сохраняется в `rc` и возвращается после уборки,
-   поэтому падение e2e роняет сборку, а не маскируется удалением контейнера. `post: always`
-   стадии архивирует `shortener-web/playwright-report/**` (`allowEmptyArchive: true`) и удаляет
-   образ по имени с тегом сборки.
+   `/api`, и первый `page.goto()` поймал бы 502. Гейт падает громко: при успехе `exit 0`, а по
+   таймауту — сообщение про 120 с, `compose ps` и `logs --tail=120 app gateway` в лог сборки,
+   затем `exit 1`, ровно как на шаге 5. Тихо выходить из цикла нельзя: следующая проверка
+   `curl -sf "${BASE_URL}/app/"` получила бы 200 от nginx и при мёртвом приложении, и стадия
+   гоняла бы Playwright против него, краснея от падений тестов, а не от таймаута. Второй шаг:
+   `curl -sf "${BASE_URL}/app/"` — бандл на месте; сборка `docker build -f shortener-web/Dockerfile
+   --target e2e -t shortener-web-e2e:ci-<номер> shortener-web` (база
+   `mcr.microsoft.com/playwright:v1.49.1-noble`, браузеры уже внутри образа, `npx playwright
+   install` в job не нужен); `docker rm -f web-e2e || true` перед `docker create --name web-e2e
+   --add-host=host.docker.internal:host-gateway -e E2E_BASE_URL=${BASE_URL}` — имя контейнера
+   глобальное на хосте, а не в пространстве имён compose-проекта, и без очистки прерванный
+   предыдущий job ронял бы `docker create` на коллизии имени в каждом следующем прогоне.
+   `E2E_BASE_URL` обязателен: `playwright.config.ts` берёт процесс-переменную, а её дефолт —
+   `http://localhost:28380`, локальный стенд задачи 14, недоступный из job'а. Код возврата
+   снимается как `rc=0`, затем `docker start -a web-e2e || rc=$?` и `exit $rc`: команда стоит в
+   AND-OR списке не последней, поэтому `-e` её не роняет, а код остаётся настоящим, не константой.
+   Уборка — `docker cp web-e2e:/web/playwright-report shortener-web/`, затем `docker rm -f web-e2e`
+   — живёт в `post: always` стадии ДО `archiveArtifacts shortener-web/playwright-report/**`
+   (`allowEmptyArchive: true`), а `docker image rm -f shortener-web-e2e:ci-<номер>` — после
+   удаления контейнера, иначе образ только теряет тег: его удерживает осиротевший контейнер.
+   Отчёт лежит внутри ФС контейнера, потому что bind-монтирование workspace в DooD не работает
+   (раздел ниже). Причина переноса уборки в `post` одна: `sh` в Jenkins идёт с `-e`, поэтому
+   внутри основного скрипта уборка не выполнилась бы при падении e2e, а отчёт нужен именно при
+   падении.
 8. `post: always` — `allure:report` + архив отчёта, затем `docker compose down -v`: стек
    сносится вместе с томами, следующий прогон начинается с чистой базы и миграций; образы
    `ci-<номер>` удаляются по именам (не `--rmi local`, иначе уехал бы и
@@ -164,7 +181,12 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
 * `Jenkinsfile` проверен структурно (баланс скобок и кавычек, место вставки стадий, все `${…}`
   внутри одинарных кавычек адресованы shell, а не Groovy) и `bash -n` по извлечённым
   shell-блокам, а не прогоном Jenkins: job берёт `Jenkinsfile` из SCM, то есть требует push,
-  а живой Jenkins на 18088 и его стек трогать нельзя.
+  а живой Jenkins на 18088 и его стек трогать нельзя;
+* фикс-раунд 1 по e2e-стадии: семантика `-e` проверена двумя экспериментами (`sh -e -c 'false;
+  rc=$?; …'` обрывается до следующей команды и даёт exit 1, `sh -e -c 'rc=0; false || rc=$?; …'`
+  доходит до конца и сохраняет код), `bash -n` по обоим shell-блокам новой стадии,
+  `docker rm -f web-e2e || true` при отсутствии контейнера — exit 0. Стадии в CI по-прежнему
+  не исполнялись, вывод непрошедших стадий не дописан.
 
 `timeout(time: 60, unit: 'MINUTES')` в `options` оставлен без изменения. Длительность новых
 веб-стадий в реальном job не замерена, поэтому поднимать лимит не на чем: 60 минут относятся к

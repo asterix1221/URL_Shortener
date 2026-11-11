@@ -163,37 +163,54 @@ pipeline {
         stage('Интерфейс: e2e') {
             steps {
                 sh '''
+                    # Отчёт прошлого прогона не должен попасть в артефакты этого: workspace между
+                    # сборками не чистится, а каталог gitignored (.gitignore:28).
+                    rm -rf shortener-web/playwright-report
                     # 429-сценарию нужен лимит 2 на пользователя. Автотесты этапа 4 отработали
                     # под 1000, теперь пересоздаём app с оверрайдом из shell-окружения.
                     RATE_LIMIT_CREATE_PER_MINUTE=2 docker compose -f "${COMPOSE_FILE}" \\
                         --env-file "${ENV_FILE}" up -d app
                     # Ждём приложение, а не nginx: /app/ отвечает из образа gateway сразу, тогда как
                     # перезапущенный Spring ещё 10-20 с не принимает /api — первый page.goto()
-                    # поймал бы 502. Ровно этот пробер стоит в стадии «Стек: готов».
+                    # поймал бы 502. Тот же пробник с той же диагностикой, что в стадии «Стек: готов».
                     for i in $(seq 1 60); do
                         if curl -sf "${BASE_URL}/actuator/health"; then
                             echo
-                            break
+                            exit 0
                         fi
                         sleep 2
                     done
+                    echo "app не отдал /actuator/health за 120 с после пересоздания"
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" ps
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" logs --tail=120 app gateway
+                    exit 1
+                '''
+                sh '''
                     curl -sf "${BASE_URL}/app/" >/dev/null            # бандл на месте: 200 из gateway
                     docker build -f shortener-web/Dockerfile --target e2e \\
                         -t shortener-web-e2e:${APP_IMAGE_TAG} shortener-web
+                    # Имя контейнера глобальное на хосте, не в пространстве имён compose-проекта:
+                    # прерванный предыдущий job оставляет его, и без очистки docker create падает
+                    # на коллизии имени в каждом следующем прогоне.
+                    docker rm -f web-e2e || true
                     docker create --name web-e2e --add-host=host.docker.internal:host-gateway \\
                         -e E2E_BASE_URL=${BASE_URL} shortener-web-e2e:${APP_IMAGE_TAG}
-                    docker start -a web-e2e; rc=$?
-                    # отчёт лежит внутри ФС контейнера: монтировать workspace демон не умеет,
-                    # поэтому вытаскиваем docker cp и только потом удаляем контейнер
-                    docker cp web-e2e:/web/playwright-report shortener-web/ || true
-                    docker rm -f web-e2e
+                    # sh в Jenkins идёт с -e: голый `docker start -a …; rc=$?` оборвал бы скрипт
+                    # до вытаскивания отчёта. В AND-OR списке -e не срабатывает, код сохраняется.
+                    rc=0
+                    docker start -a web-e2e || rc=$?
                     exit $rc
                 '''
             }
             post {
                 always {
+                    // отчёт лежит внутри ФС контейнера: монтировать workspace демон не умеет,
+                    // поэтому вытаскиваем docker cp и только потом удаляем контейнер
+                    sh 'docker cp web-e2e:/web/playwright-report shortener-web/ || true'
+                    sh 'docker rm -f web-e2e || true'
                     archiveArtifacts artifacts: 'shortener-web/playwright-report/**',
                                      allowEmptyArchive: true
+                    // после удаления контейнера, иначе image rm только снимет тег
                     sh 'docker image rm -f shortener-web-e2e:${APP_IMAGE_TAG} || true'
                 }
             }
