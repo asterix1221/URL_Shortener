@@ -163,12 +163,13 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
 
 ### Веб-стадии: написаны, не исполнены
 
-Шаги 2 и 7 добавлены в `Jenkinsfile`, но в реальном job не выполнялись. Job берёт `Jenkinsfile`
-из репозитория на GitHub (`infra/jenkins/job-config.xml`, параметр `GIT_BRANCH`), поэтому прогон
-новых стадий требует push ветки `stage-9-web` в origin — это отдельное явное согласие заказчика,
-которого нет. То же и с `.github/workflows/web.yml`: workflow исполняется только по push в `main`
-или по PR. Ни одна из новых стадий не объявляется зелёной, и в разделе «Прогон» ниже нет строк
-с выдуманным выводом.
+Шаги 2 и 7 добавлены в `Jenkinsfile`, но в реальном job не выполнялись: рабочий стенд остановлен,
+а job берёт `Jenkinsfile` из репозитория на GitHub (`infra/jenkins/job-config.xml`, параметр
+`GIT_BRANCH`). Ветка `stage-9-web` запушена в origin по явному согласию заказчика и открыт PR #4,
+но Jenkins от этого не запускается — его новые стадии по-прежнему не исполнены и зелёными
+не объявляются. `.github/workflows/web.yml` исполняется по push в `main` и по PR, поэтому
+на PR #4 он отработал: `unit` — success, `e2e` первого прогона завис в `Install browsers`
+и был отменён (разбор в подразделе ниже). В разделе «Прогон» нет строк с выдуманным выводом.
 
 Что проверено без push, на этой машине:
 
@@ -206,6 +207,57 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
 внутри таргетов `unit` и `e2e` тянет зависимости заново, а e2e-образ добавляет слой Playwright
 с браузерами. Пересматривать лимит после первого реального прогона — по фактическому времени
 стадий из `wfapi/describe`, и только тогда записывать сюда новую цифру с причиной.
+
+### Первый прогон web.yml в CI: распаковщик Playwright встаёт на Node 26
+
+Прогон `web` на PR #4 довёл `e2e` до шага `Install browsers` и остановился (`unit` — success).
+По логу job'а: шаг `Start stack` с 18:29:38.510 до 18:30:54.452 — **76 с**, образы
+`shortener-service:web-ci` и `shortener-gateway:web-ci` собраны, контейнеры подняты, ожидание
+`/actuator/health` и проверка `/app/` прошли. `Install browsers` стартовал в 18:31:13.495,
+apt-зависимости встали чисто (`Service restarts being deferred`, интерактивного запроса не было),
+загрузка `Chromium 131.0.6778.33 (playwright build v1148)` с
+`https://playwright.azureedge.net/builds/chromium/1148/chromium-linux.zip` дошла от 0% до
+`100% of 161.3 MiB` за **0.84 с** (18:31:21.716 → 18:31:22.555) — и дальше ни строки до
+`The operation was canceled.` в 19:13:04.020, то есть **41 мин 41 с** тишины. Job отменён вручную:
+GitHub отдаёт логи только завершённого job'а, до отмены запрос возвращал `404 BlobNotFound`.
+В `web.yml` не было `timeout-minutes`, поэтому дефолтные 360 минут job'а молчали бы до конца.
+
+Причина не в сети и не в CDN. Zip, скачанный при локальном повторе (143564014 Б, 85 записей),
+проверен независимо от Playwright: `zipfile` в Python читает `chrome-win/chrome.dll` целиком,
+238968832 Б, CRC `0x2f739fa9` совпадает с объявленным в центральной директории. Байты целые —
+ломается распаковщик:
+
+* локальный `PLAYWRIGHT_BROWSERS_PATH=<temp> npx playwright install chromium` на той же версии
+  1.49.1: загрузка 100% of 136.9 MiB, выхода нет, `timeout 420` убивает процесс (`exit 124`).
+  В каталоге браузеров два файла — манифест 226 Б и `chrome.dll` **238948275 Б** вместо 238968832,
+  маркера `INSTALLATION_COMPLETE` нет; размер не растёт за 20 с наблюдения, CPU дочернего процесса
+  3.94 с за всё время, свободного места на диске 281.63 ГБ;
+* изолированный вызов `extract()` из `playwright-core/lib/zipBundle.js` на том же zip:
+  Node **v26.12.0** — обрыв на тех же 238948275 Б уже к 3-й секунде и `PROBE_TIMEOUT_60S`
+  без ошибок и без `unhandledRejection`; Node **v22.23.5** — `EXTRACT_RESOLVED after 2.8 s`,
+  81 файл;
+* полный `install chromium` под Node v22.23.5 — exit 0, `INSTALLATION_COMPLETE` на месте.
+
+Механизм по исходникам 1.49.1: `_downloadExecutable` передаёт загрузку дочернему процессу
+(`oopDownloadBrowserMain.js`), родитель резолвит ожидание только по его `exit`/`error`, а дочерний
+после загрузки ждёт `extract()`. Три повтора в `browserFetcher` срабатывают на ошибку, но не
+на зависание; `PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT` (30000 по умолчанию) — таймаут соединения,
+не чтения. Отсюда тишина вместо падения. Node 26 — общий фактор двух площадок: в CI
+`node-version: '26'`, в shell на этой машине `node --version` = v26.12.0. Установка 9 ноября
+на прежнем Node прошла полностью: 82 файла, 314 МБ, `chrome.dll` 238968832 Б, маркер на месте.
+
+Правка в `web.yml` — две строки конфигурации плюс комментарии: `node-version: '22'` в `e2e`
+и `timeout-minutes: 30` на job. `unit` остаётся на 26 (литералы `Intl`, правило задачи 7
+к задаче 16), `runs-on` не меняется: зависание воспроизведено и на Windows, то есть ОС ни при чём.
+Версия Node в `e2e` на ассерты не влияет — текст интерфейса считает Chromium,
+в `shortener-web/e2e` нет ни `Intl`, ни `toLocale*`; `engines` проекта `node >=20`,
+vite 5 и vitest 2 допускают 22. Проверка правки на этой машине: разбор PyYAML `yaml.safe_load`
+— exit 0, в разобранной структуре `unit` с `node-version '26'`, `e2e` с `'22'`
+и `timeout-minutes 30`.
+
+Jenkins этой проблемы не касается: его e2e-стадия идёт в образе
+`mcr.microsoft.com/playwright:v1.49.1-noble` (`shortener-web/Dockerfile:20`), браузеры приезжают
+вместе с образом, шага `playwright install` там нет вовсе.
 
 ### Bind-монтирования репозитория в DooD не работают
 

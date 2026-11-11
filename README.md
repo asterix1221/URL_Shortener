@@ -287,17 +287,28 @@ max_clicks`: ноль обновлённых строк означает «ис�
 
 `web.yml` — контур интерфейса, два job'а. `unit`: Node 26, `npm ci` → `npm run lint` →
 `npm run typecheck` → `npm run coverage` (vitest + гейт покрытия), working-directory
-`shortener-web`. `e2e` с `needs: unit`: `cp infra/.env.example infra/.env` и подмена
-`JWT_SECRET`, `docker compose … up -d --build` (стек на 8080, `APP_PORT` из `.env.example`),
-ожидание `/actuator/health` (90 попыток по 2 с), проверка `/app/`, затем `npm ci`,
+`shortener-web`. `e2e` с `needs: unit` и `timeout-minutes: 30`: `cp infra/.env.example infra/.env`
+и подмена `JWT_SECRET`, `docker compose … up -d --build` (стек на 8080, `APP_PORT` из
+`.env.example`), ожидание `/actuator/health` (90 попыток по 2 с), проверка `/app/`, затем `npm ci`,
 `npx playwright install --with-deps chromium` и `npx playwright test --workers=1`. В `env` job'а
 `RATE_LIMIT_CREATE_PER_MINUTE: '2'` (нужен сценарию `ratelimit.spec.ts`, перекрывает 1000 из
 `.env`), `E2E_BASE_URL: http://localhost:8080` (дефолт конфига — 28380, локальный стенд задачи 14)
 и `APP_IMAGE_TAG: web-ci` — тег образов сборки. Отчёт `playwright-report` выгружается
 артефактом только при падении (`if: failure()`). Предупреждение
 `ExperimentalWarning: localStorage is not available …` в юнит-прогоне — средовое (мост в
-`src/test/setup.ts` под Node 26), провалом стадии не считается. Оба job'а написаны, но в CI
-не исполнены: проверка workflow требует push'а, а он даётся отдельным согласием заказчика.
+`src/test/setup.ts` под Node 26), провалом стадии не считается.
+
+Масти Node в двух job'ах разные сознательно. `unit` остаётся на 26: литералы `Intl` в
+`src/lib/format.test.ts` замерены на v26.12.0 / ICU 78.3, на другой масти они вправе разойтись.
+`e2e` переведён на 22 после первого прогона в CI: распаковщик Playwright 1.49.1 на Node 26
+зависает уже после загрузки браузера — один и тот же zip `chromium-1148` на v26.12.0 обрывает
+`chrome.dll` на 238948275 Б из 238968832 и не пишет `INSTALLATION_COMPLETE` (60 с без прогресса),
+а на v22.23.5 распаковывается за 2.8 с, полный `install` — exit 0. Ассерты e2e от масти Node
+не зависят: даты и числа считает Chromium, в `shortener-web/e2e` нет ни `Intl`, ни `toLocale*`.
+`timeout-minutes: 30` поставлен там же: без границы зависший шаг молчит до дефолтных 360 минут
+job'а, а не падает. Первый прогон на PR #4: `unit` — success, `e2e` простоял 41 минуту
+в `Install browsers` и был отменён вручную, чтобы забрать логи job'а. Стадии Jenkins
+не исполнялись: рабочий стенд остановлен.
 
 **Jenkins** (`Jenkinsfile` + `infra/jenkins/`) — self-hosted, поднимается этим же
 compose-файлом:
