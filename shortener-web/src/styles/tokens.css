@@ -9,8 +9,9 @@
 [data-theme='dark'] {
   --bg: #0f1115; --surface: #161a20; --text: #e7e9ee; --muted: #9aa2af; --border: #262b33;
 }
-/* `transition: none` сам по себе не глушил бы ничего: единственное движение в base.css —
-   `animation: spin … infinite` у `.spinner`, а оно через transition не проходит */
+/* `transition: none !important` глушит реальные переходы base.css: смену цвета кнопок, ссылок и
+   самой страницы за 120ms (спека §7:200), в том числе при переключении темы. `animation-duration`
+   по-прежнему нужен отдельно: `animation: spin … infinite` у `.spinner` через transition не проходит */
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
 }
