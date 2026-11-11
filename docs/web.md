@@ -147,7 +147,8 @@ Tests **179 passed (179)**; api+lib строки **100.00 %**, компонен�
   (1280x900 и 390x844, ниже 900px таблица сворачивается в карточки), 110 видимых целей,
   минимум высоты ровно **44px**, нарушений `height < 44` — ноль. Ширина ссылки-кода в таблице
   на desktop 29.31px при высоте 44px: критерий спеки §7:197 закрыт высотой (это строка таблицы,
-  а не квадратная кнопка), на mobile та же ссылка 190.69x44. Поля 44x215, селект размера 44x82 —
+  а не квадратная кнопка), на mobile та же ссылка 190.69x44. Поля 44x215, поле даты
+  (`datetime-local`) 44x217, селект размера 44x82 —
   ширина полей осталась браузерной, раскладка форм не менялась.
 - **Переходы 120ms.** `.btn, .btn-ghost, .icon-btn` — `background-color`, `border-color`, `color`;
   `a` — `color`; `body` — `background-color`, `color` (переключение темы без скачка). Длительность —
@@ -182,7 +183,7 @@ Tests **179 passed (179)**; api+lib строки **100.00 %**, компонен�
 | Vitest | **Test Files 33 passed (33), Tests 179 passed (179)**, Duration 30.85 с | прогон фикс-раунда, `npm run coverage`, exit 0 (`logs-fix/01-web-checks.log`); прежнее число Task 17 — 175 тестов, 16.13 с |
 | Покрытие | api+lib строки **100.00 %** (нужно 100 %), компоненты строки **100.00 %** (нужно 80 %), ветки **100.00 %** (нужно 75 %) | тот же прогон фикс-раунда, «Гейт покрытия пройден» |
 | Playwright | **5 spec-файлов, 6 тестов** (`auth` — 2, `links`/`ratelimit`/`session`/`stats` — по 1), `workers: 1`, `retries: 0`; прогон фикс-раунда финального ревью — **6 passed (9.9 с)**; прежние прогоны фикс-раунда Task 15 — 6 passed (13.2 с) и 6 passed (7.6 с) | `logs-fix/05-e2e.log`; task-15-fix-1-report.md |
-| Цели нажатия | минимум высоты **44px**: 110 видимых целей в 8 состояниях (список, список с диалогом удаления, карточка, вход × вьюпорты 1280x900 и 390x844), нарушений `height < 44` — 0; поля 44x215, селект размера 44x82, ссылка-код в таблице 44x29.31 на desktop и 44x190.69 на mobile | замер фикс-раунда, `logs-fix/a11y-targets.json`, `logs-fix/06-browser.log` |
+| Цели нажатия | минимум высоты **44px**: 110 видимых целей в 8 состояниях (список, список с диалогом удаления, карточка, вход × вьюпорты 1280x900 и 390x844), нарушений `height < 44` — 0; поля 44x215, поле даты (`datetime-local`) 44x217, селект размера 44x82, ссылка-код в таблице 44x29.31 на desktop и 44x190.69 на mobile | замер фикс-раунда, `logs-fix/a11y-targets.json`, `logs-fix/06-browser.log` |
 | Переходы | `transitionDuration` **0.12s** у `.btn`, `.btn-ghost`, `.icon-btn`, `a`, `body`; при эмуляции `prefers-reduced-motion: reduce` — `transitionProperty: none`, `0s`, тема и диалог продолжают работать | замер фикс-раунда, `logs-fix/motion.json` |
 | smoke | код выхода 0, строка `UI: /app/ 200 text/html, index no-store, /app/assets/index-BuuxQOqv.js max-age=31536000 immutable, / и /app -> 302 /app/`; заголовок ассета одной строкой `Cache-Control: public, max-age=31536000, immutable` | прогон фикс-раунда против стенда `-p s9fix` (порт 28380), `logs-fix/03-smoke.log`, `logs-fix/04-cache-header.log` |
 | `npm audit` | **18 advisories: 12 moderate, 3 high, 3 critical** (info 0, low 0); зависимости: prod 8, dev 374, optional 52, peer 7, всего 381 | замер Task 17 (`task-17-report.md`, раздел проверок); в фикс-раунде `package.json` и `package-lock.json` не менялись, повторный аудит не запускался |
