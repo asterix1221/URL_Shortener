@@ -2,6 +2,7 @@
 
 [![autotests](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml)
 [![service-tests](https://github.com/asterix1221/URL_Shortener/actions/workflows/service-tests.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/service-tests.yml)
+[![web](https://github.com/asterix1221/URL_Shortener/actions/workflows/web.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/web.yml)
 ![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/asterix1221/URL_Shortener/main/docs/coverage.json)
 
 Сервис сокращения ссылок на Spring Boot: редирект, JWT-аутентификация, статистика кликов,
@@ -23,6 +24,8 @@ flowchart LR
   G[Grafana] --> PR
   GT[Gatling] --> GW
   AT[REST Assured автотесты] --> GW
+  GW -- "/app/" --> W[Статика интерфейса в образе gateway]
+  UI[Playwright e2e] --> GW
 ```
 
 Клик проходит по двум разным путям, и это главное, что нужно понять по схеме: сам редирект только
@@ -42,6 +45,7 @@ Prometheus ходит к `app:8080` внутри сети compose.
 # 1. поднять стек: gateway nginx + Postgres + Redis + Kafka + приложение
 Copy-Item infra\.env.example infra\.env
 docker compose -f infra\docker-compose.yml --env-file infra\.env up -d --build
+# интерфейс: http://localhost:8080/app/ (тот же gateway, что и API)
 
 # 1b. мониторинг для нагрузочных прогонов — отдельный профиль (в CI не поднимается)
 docker compose -f infra\docker-compose.yml --env-file infra\.env --profile monitoring up -d
@@ -88,6 +92,7 @@ infra/                docker-compose (gateway nginx, Postgres, Redis, Kafka, Pro
 shortener-service/    Spring Boot сервис
 shortener-autotests/  REST Assured автотесты + Allure
 shortener-loadtests/  Gatling-симуляции
+shortener-web/        Vite+React+TS, Vitest, Playwright (e2e/)
 Jenkinsfile           полный CI-прогон в Jenkins (тесты → образ → стек → автотесты → Allure)
 scripts/              smoke.ps1, seed.sql, вспомогательные скрипты
 docs/                 отчёты по тестам и нагрузочным экспериментам
@@ -173,6 +178,28 @@ max_clicks`: ноль обновлённых строк означает «ис�
 - `client_max_body_size 16k`: большее тело — 413 ещё до сервиса; `proxy_read_timeout` 10 s.
 - Прокинутые статусы не подменяются (`proxy_intercept_errors off`), поэтому `302`, `410 Gone`
   и `429` с `Retry-After` доходят клиенту как есть.
+
+## Интерфейс
+
+Веб-интерфейс (`shortener-web/`, Vite + React + TypeScript) отдаётся тем же gateway под `/app/`:
+бандл запечён в образ (`infra/web.Dockerfile`), отдельного контейнера у интерфейса нет, запросы
+к API идут на свой origin — CORS не нужен. Что есть: вход и регистрация на одном экране, список
+ссылок (создание, копирование короткого адреса, удаление с подтверждением, серверная пагинация),
+карточка ссылки со статистикой (счётчик переходов, гистограмма по дням, источники переходов),
+светлая и тёмная темы, русский и английский языки. Запуск, карта ошибок, пороги покрытия и числа
+замеров — `docs/web.md`.
+
+Чего в интерфейсе нет, и почему:
+
+- **Редактирование ссылки.** В API нет эндпоинта PATCH/PUT для ссылки (`LinkController` — только
+  создание, чтение, удаление и статистика), поэтому изменить адрес или срок жизни ссылки нельзя
+  ни через интерфейс, ни напрямую; остаётся удалить и создать заново.
+- **Refresh-токен и серверный logout.** `AuthController` даёт только register/login: токен живёт
+  3600 с в sessionStorage, «выход» очищает его только в браузере, серверного отзыва нет.
+- **Число переходов в списке.** `GET /api/links` его не отдаёт, а `/stats` на каждую строку был бы
+  N+1 за счёт пользователя; счётчик виден в карточке ссылки.
+- **Публичный редирект в UI.** Переход по короткой ссылке обслуживает сервис (`GET /{code}` → 302),
+  интерфейс в нём не участвует.
 
 ## Тесты
 
@@ -331,6 +358,9 @@ Testcontainers с Allure. Установка job'а, плагинный набо
   [`06`](docs/experiments/06-soak.md)).
 - **Снимки дашборда не рисует Grafana** (нет `grafana-image-renderer`), вместо них кадры, собранные
   по журналам (7.2–7.6), — воспроизводимые, но не «как это видит человек в UI».
+- **Интерфейс не объект нагрузочных замеров.** Профили Gatling и `docs/baseline.md` от этапа 9
+  не изменились: нагрузка этапа 7 измеряет HTTP-тракт сервиса, а отрисовку SPA в браузере
+  никто не мерил.
 
 ## Ссылки
 
