@@ -250,9 +250,23 @@ max_clicks`: ноль обновлённых строк означает «ис�
 
 Два контура, и оба видны из README.
 
-**GitHub Actions** (`service-tests.yml`, `autotests.yml`) — то, что проверяет сам GitHub:
+**GitHub Actions** (`service-tests.yml`, `autotests.yml`, `web.yml`) — то, что проверяет сам GitHub:
 юнит и интеграционные тесты, прогон автотестов против стека, который workflow поднимает на
 раннере, бейджи и файл покрытия. Плагины и версии в нём зафиксированы числами.
+
+`web.yml` — контур интерфейса, два job'а. `unit`: Node 26, `npm ci` → `npm run lint` →
+`npm run typecheck` → `npm run coverage` (vitest + гейт покрытия), working-directory
+`shortener-web`. `e2e` с `needs: unit`: `cp infra/.env.example infra/.env` и подмена
+`JWT_SECRET`, `docker compose … up -d --build` (стек на 8080, `APP_PORT` из `.env.example`),
+ожидание `/actuator/health` (90 попыток по 2 с), проверка `/app/`, затем `npm ci`,
+`npx playwright install --with-deps chromium` и `npx playwright test --workers=1`. В `env` job'а
+`RATE_LIMIT_CREATE_PER_MINUTE: '2'` (нужен сценарию `ratelimit.spec.ts`, перекрывает 1000 из
+`.env`), `E2E_BASE_URL: http://localhost:8080` (дефолт конфига — 28380, локальный стенд задачи 14)
+и `APP_IMAGE_TAG: web-ci` — тег образов сборки. Отчёт `playwright-report` выгружается
+артефактом только при падении (`if: failure()`). Предупреждение
+`ExperimentalWarning: localStorage is not available …` в юнит-прогоне — средовое (мост в
+`src/test/setup.ts` под Node 26), провалом стадии не считается. Оба job'а написаны, но в CI
+не исполнены: проверка workflow требует push'а, а он даётся отдельным согласием заказчика.
 
 **Jenkins** (`Jenkinsfile` + `infra/jenkins/`) — self-hosted, поднимается этим же
 compose-файлом:
@@ -262,13 +276,21 @@ docker compose -f infra\docker-compose.yml --env-file infra\.env --profile ci up
 # UI: http://localhost:18088 (порт bound к 127.0.0.1), логин из infra\.env
 ```
 
-Прогон `shortener-ci`: `mvn verify` (юнит + интеграционные + JaCoCo) → `docker build` под
-тегом `shortener-service:ci-<номер>` и образ gateway с запечённым `nginx.conf` (в CI-стеке
-конфигурация не монтируется из репозитория: хостовый демон, к которому job обращается через
-сокет, не видит workspace сборки) → те же теги встают в CI-стек `shortener-ci` на портах
-28180/5442/6389/29092 (не пересекаются с рабочей копией) → ожидание `/actuator/health` →
-API-автотесты через gateway → Allure в артефакты → `down -v` в `post: always`. Секреты
-стенда генерируются `openssl rand` на время сборки и в репозиторий не попадают.
+Прогон `shortener-ci`: `mvn verify` (юнит + интеграционные + JaCoCo) → юнит-гейт интерфейса
+(`docker build --target unit` + `docker run --rm`, образ `shortener-web-unit:ci-<номер>`:
+Node на агенте нет, поэтому линт, типы, vitest и гейт покрытия едут в контейнере) →
+`docker build` под тегом `shortener-service:ci-<номер>` и образ gateway с запечённым
+`nginx.conf` (в CI-стеке конфигурация не монтируется из репозитория: хостовый демон, к которому
+job обращается через сокет, не видит workspace сборки) → те же теги встают в CI-стек
+`shortener-ci` на портах 28180/5442/6389/29092 (не пересекаются с рабочей копией) → ожидание
+`/actuator/health` → API-автотесты через gateway → e2e интерфейса против того же стека
+(`app` пересоздаётся с лимитом создания 2 в минуту, образ `shortener-web-e2e:ci-<номер>`,
+контейнер `web-e2e` с `E2E_BASE_URL`, отчёт `playwright-report` в артефакты) → Allure в
+артефакты → `down -v` в `post: always`. Секреты стенда генерируются `openssl rand` на время
+сборки и в репозиторий не попадают. Обе веб-стадии написаны, но в реальном job не исполнены
+(job берёт `Jenkinsfile` с GitHub, нужен push), поэтому `timeout(time: 60, unit: 'MINUTES')`
+не поднят: фактического времени новых стадий нет. Нумерация шагов и честная оценка лимита —
+в `docs/ci-jenkins.md`.
 
 Отдельно от Actions этот контур нужен потому, что у него есть docker-демон с постоянной
 сетью: «собрать образ → поднять им полный стек → дёрнуть его по HTTP» на раннере GitHub не

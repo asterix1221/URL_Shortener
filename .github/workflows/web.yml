@@ -1,0 +1,78 @@
+name: web
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: shortener-web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: shortener-web/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run coverage
+  e2e:
+    runs-on: ubuntu-latest
+    needs: unit
+    # Лимит 2 на пользователя нужен сценарию ratelimit.spec.ts; shell-переменные перекрывают
+    # RATE_LIMIT_CREATE_PER_MINUTE=1000 из infra/.env, API-автотесты живут в другом workflow.
+    # E2E_BASE_URL обязателен: конфиг берёт процесс-переменную, а по умолчанию там 28380 — локальный
+    # изолированный стенд задачи 14. В раннере стек опубликован на 8080 (APP_PORT=8080 из
+    # infra/.env.example), без этой строки все пять спеков упали бы на ERR_CONNECTION_REFUSED.
+    env:
+      RATE_LIMIT_CREATE_PER_MINUTE: '2'
+      E2E_BASE_URL: http://localhost:8080
+      # Тег образов job'а: правило «APP_IMAGE_TAG на каждом стендовом прогоне» одно для обоих CI,
+      # а на эфемерном раннере он ещё и делает образы сборки различимыми в логах compose.
+      APP_IMAGE_TAG: web-ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare env
+        run: |
+          cp infra/.env.example infra/.env
+          sed -i "s|^JWT_SECRET=.*|JWT_SECRET=ci-secret-ci-secret-ci-secret-1234567|" infra/.env
+      - name: Start stack (gateway вместе с бандлом)
+        run: docker compose -f infra/docker-compose.yml --env-file infra/.env up -d --build
+      - name: Wait for app and UI
+        run: |
+          # /app/ отдаёт nginx из образа, он готов сразу; ждать нужно приложение — иначе
+          # первый же POST /api/auth/register в e2e ловит 502 вместо ответа сервиса.
+          for i in $(seq 1 90); do
+            curl -sf http://localhost:8080/actuator/health >/dev/null && exit 0
+            sleep 2
+          done
+          docker compose -f infra/docker-compose.yml logs gateway app
+          exit 1
+      - name: Проверка, что бандл на месте
+        run: curl -sf http://localhost:8080/app/ >/dev/null
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: npm
+          cache-dependency-path: shortener-web/package-lock.json
+      # npm ci ДО запуска playwright: без node_modules `npx playwright …` тянет из реестра пакет
+      # `playwright`, тогда как конфиг и спеки импортируют `@playwright/test` (пин 1.49.1 из
+      # package-lock.json) и браузеры ставятся ровно под него.
+      - name: Install dependencies
+        working-directory: shortener-web
+        run: npm ci
+      - name: Install browsers
+        working-directory: shortener-web
+        run: npx playwright install --with-deps chromium
+      - name: e2e
+        working-directory: shortener-web
+        run: npx playwright test --workers=1
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: shortener-web/playwright-report

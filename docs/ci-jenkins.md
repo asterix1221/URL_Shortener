@@ -6,10 +6,13 @@ Jenkins поднимается вместе с проектом — это се�
 
 ## Зачем отдельный Jenkins, если есть GitHub Actions
 
-`service-tests.yml` и `autotests.yml` гоняют тесты на раннерах GitHub — там нет docker-демона
-с постоянной сетью, поэтому «собрать образ → поднять им полный стек → прогнать автотесты по
-HTTP» там не воспроизводится. Jenkins на хосте делает именно это, и заодно остаётся место,
-где видно историю сборок и артефакты (Allure, JaCoCo, протоколы тестов) внутри стенда.
+`service-tests.yml`, `autotests.yml` и `web.yml` гоняют тесты на раннерах GitHub — там нет
+docker-демона с постоянной сетью, поэтому «собрать образ → поднять им полный стек → прогнать
+автотесты по HTTP» там не воспроизводится между сборками. Jenkins на хосте делает именно это,
+и заодно остаётся место, где видно историю сборок и артефакты (Allure, JaCoCo, протоколы тестов)
+внутри стенда. `web.yml` поднимает стек и на раннере — для e2e интерфейса, — но раннер эфемерный:
+история, артефакты и постоянная сеть остаются за Jenkins, а интеграционные тесты на
+Testcontainers и Allure в GitHub Actions не перенесены.
 
 ## Запуск
 
@@ -92,25 +95,84 @@ curl -s -X POST -u "admin:$JENKINS_ADMIN_PASSWORD" \
 1. `mvn -B verify` в `shortener-service` — surefire (юнит) + failsafe (интеграционные на
    Testcontainers) + JaCoCo; шаг `junit` публикует протоколы, `archiveArtifacts` — HTML
    отчёт покрытия.
-2. `docker build -t shortener-service:ci-<номер>` и `docker compose build gateway` — теги
+2. `Интерфейс: линт, типы, Vitest и гейт покрытия` — `docker build -f shortener-web/Dockerfile
+   --target unit -t shortener-web-unit:ci-<номер> shortener-web`, затем `docker run --rm` того
+   же образа. В таргет `unit` уже зашиты `RUN npm run lint && npm run typecheck`, а
+   `CMD ["npm","run","coverage"]` — это vitest и `scripts/coverage-gate.mjs`, поэтому один
+   запуск контейнера прогоняет весь юнит-гейт интерфейса. Node на агенте не появляется
+   (`infra/jenkins/Dockerfile` копирует только бинарные docker и Maven), отсюда контейнер.
+   Стадия стоит до сборки образов и подъёма стека: юнит-тестам сеть не нужна, а упавший гейт
+   не должен тратить время на стек. `post: always` стадии удаляет образ по имени с тегом
+   сборки — `:dev` или сборка без `-t` задели бы образ рабочего стенда.
+3. `docker build -t shortener-service:ci-<номер>` и `docker compose build gateway` — теги
    попадают в compose (`image: shortener-service:${APP_IMAGE_TAG}` у сервиса `app` и
    `shortener-gateway:${APP_IMAGE_TAG}` у сервиса `gateway` базового файла), поэтому стек
    поднимает ровно те образы, которые были собраны и названы в этой сборке, а не копию
    `shortener-ci-app` или образ с прошлой сборки. Образ gateway собирает `infra/web.Dockerfile`
    из контекста-корня репозитория: внутри и конфигурация nginx, и бандл интерфейса
    (`npx vite build` в `shortener-web`), поэтому CI поднимает тот же вход, что и разработка.
-3. `docker compose -f infra/docker-compose.yml up -d` в отдельном проекте `shortener-ci` и на
+4. `docker compose -f infra/docker-compose.yml up -d` в отдельном проекте `shortener-ci` и на
    своих хост-портах (28180/5442/6389/29092), чтобы не пересекаться с рабочей копией стека.
    Секреты стенда (`POSTGRES_PASSWORD`, `JWT_SECRET`, `IP_SALT`) генерируются `openssl rand`
    на одну сборку и не хранятся в репозитории.
-4. Ожидание `GET /actuator/health` через `host.docker.internal` (60 попыток по 2 с); при
+5. Ожидание `GET /actuator/health` через `host.docker.internal` (60 попыток по 2 с); при
    таймауте в лог сборки кладутся `compose ps` и `logs --tail=120 app gateway`.
-5. `mvn -B test -DbaseUrl=…` в `shortener-autotests` — автотесты идут через gateway nginx,
+6. `mvn -B test -DbaseUrl=…` в `shortener-autotests` — автотесты идут через gateway nginx,
    то же самое зеркало, что и у ручной проверки.
-6. `post: always` — `allure:report` + архив отчёта, затем `docker compose down -v`: стек
+7. `Интерфейс: e2e` — после API-автотестов, против того же уже поднятого стека. Сначала
+   `RATE_LIMIT_CREATE_PER_MINUTE=2 docker compose … up -d app`: сценарию `ratelimit.spec.ts`
+   нужен лимит 2 на пользователя, а автотесты шага 6 отработали под 1000 из `CI_RATE_LIMIT`.
+   Образ при этом не пересобирается — тег остаётся `ci-<номер>`, меняется только окружение
+   контейнера. Дальше тот же пробер `/actuator/health` (60 попыток по 2 с), что и на шаге 5:
+   `/app/` отдаёт nginx из образа сразу, тогда как перезапущенный Spring ещё не принимает
+   `/api`, и первый `page.goto()` поймал бы 502; затем `curl -sf "${BASE_URL}/app/"` — бандл
+   на месте. Сборка `docker build -f shortener-web/Dockerfile --target e2e
+   -t shortener-web-e2e:ci-<номер> shortener-web` (база `mcr.microsoft.com/playwright:v1.49.1-noble`,
+   браузеры уже внутри образа, `npx playwright install` в job не нужен), `docker create --name
+   web-e2e --add-host=host.docker.internal:host-gateway -e E2E_BASE_URL=${BASE_URL}` и
+   `docker start -a web-e2e`. `E2E_BASE_URL` обязателен: `playwright.config.ts` берёт
+   процесс-переменную, а её дефолт — `http://localhost:28380`, локальный стенд задачи 14,
+   недоступный из job'а. Отчёт забирается `docker cp web-e2e:/web/playwright-report
+   shortener-web/` до `docker rm -f web-e2e`: bind-монтирование workspace в DooD не работает
+   (раздел ниже). Код возврата `docker start` сохраняется в `rc` и возвращается после уборки,
+   поэтому падение e2e роняет сборку, а не маскируется удалением контейнера. `post: always`
+   стадии архивирует `shortener-web/playwright-report/**` (`allowEmptyArchive: true`) и удаляет
+   образ по имени с тегом сборки.
+8. `post: always` — `allure:report` + архив отчёта, затем `docker compose down -v`: стек
    сносится вместе с томами, следующий прогон начинается с чистой базы и миграций; образы
    `ci-<номер>` удаляются по именам (не `--rmi local`, иначе уехал бы и
-   `shortener-jenkins:local` с 71 плагином).
+   `shortener-jenkins:local` с 71 плагином). Отчёт Playwright архивируется раньше — в `post`
+   шага 7, — потому что `down -v` сносит стек, а отчёт к тому моменту уже лежит в workspace.
+
+### Веб-стадии: написаны, не исполнены
+
+Шаги 2 и 7 добавлены в `Jenkinsfile`, но в реальном job не выполнялись. Job берёт `Jenkinsfile`
+из репозитория на GitHub (`infra/jenkins/job-config.xml`, параметр `GIT_BRANCH`), поэтому прогон
+новых стадий требует push ветки `stage-9-web` в origin — это отдельное явное согласие заказчика,
+которого нет. То же и с `.github/workflows/web.yml`: workflow исполняется только по push в `main`
+или по PR. Ни одна из новых стадий не объявляется зелёной, и в разделе «Прогон» ниже нет строк
+с выдуманным выводом.
+
+Что проверено без push, на этой машине:
+
+* синтаксис `.github/workflows/web.yml` — разбор PyYAML (`yaml.safe_load`), exit 0; в разобранной
+  структуре оба job'а, `needs: unit` у `e2e` и три ключа `env`: `RATE_LIMIT_CREATE_PER_MINUTE: '2'`,
+  `E2E_BASE_URL: http://localhost:8080`, `APP_IMAGE_TAG: web-ci`;
+* сборка обоих таргетов `shortener-web/Dockerfile` — `--target unit` и `--target e2e`, exit 0;
+* те же команды юнит-гейта вручную на хосте в `shortener-web`: `npm run lint`, `npm run typecheck`,
+  `npm run coverage`;
+* `Jenkinsfile` проверен структурно (баланс скобок и кавычек, место вставки стадий, все `${…}`
+  внутри одинарных кавычек адресованы shell, а не Groovy) и `bash -n` по извлечённым
+  shell-блокам, а не прогоном Jenkins: job берёт `Jenkinsfile` из SCM, то есть требует push,
+  а живой Jenkins на 18088 и его стек трогать нельзя.
+
+`timeout(time: 60, unit: 'MINUTES')` в `options` оставлен без изменения. Длительность новых
+веб-стадий в реальном job не замерена, поэтому поднимать лимит не на чем: 60 минут относятся к
+прежнему набору стадий (сборка №5 — 127 711 мс, семь стадий). Любой локальный замер — нижняя
+оценка, а не прогноз: на хосте базовые образы и слои уже прогреты, в job кеш холодный, `npm ci`
+внутри таргетов `unit` и `e2e` тянет зависимости заново, а e2e-образ добавляет слой Playwright
+с браузерами. Пересматривать лимит после первого реального прогона — по фактическому времени
+стадий из `wfapi/describe`, и только тогда записывать сюда новую цифру с причиной.
 
 ### Bind-монтирования репозитория в DooD не работают
 
@@ -231,3 +293,9 @@ Testcontainers; `TESTCONTAINERS_HOST_OVERRIDE` нужен тем же интег
 `.github/workflows/autotests.yml` вызывают `up` без профилей. Тот же коммит зелёный и в
 GitHub Actions: run `41324333179` (workflow `autotests`, заголовок страницы ссылается на
 `7461d76`), бейдж workflow — `passing`.
+
+Сборки №3-№5 шли до появления веб-стадий, поэтому в их таблицах и консолях шагов 2 и 7 нет.
+Дописывать сюда вывод непрошедших стадий нечем: они написаны, не исполнены (см. раздел выше).
+Первый реальный прогон добавит в таблицу две строки — `Интерфейс: линт, типы, Vitest и гейт
+покрытия` и `Интерфейс: e2e` — и фактическое время, по которому будет решаться вопрос о лимите
+`timeout`.

@@ -1,5 +1,6 @@
 // Jenkins-пайплайн URL Shortener: сборка сервиса → тесты (unit + интеграционные на
-// Testcontainers) → образ → полноценный стек в Docker Compose → API-автотесты → Allure.
+// Testcontainers) → юнит-гейт интерфейса в контейнере → образ → полноценный стек в Docker
+// Compose → API-автотесты → e2e интерфейса против того же стека → Allure.
 //
 // ТРЕБОВАНИЕ К АГЕНТУ: job выполняется внутри контейнера Jenkins, где смонтирован сокет
 // хостового Docker-демона (сервис jenkins в infra/docker-compose.yml). Поэтому:
@@ -76,6 +77,19 @@ pipeline {
             }
         }
 
+        stage('Интерфейс: линт, типы, Vitest и гейт покрытия') {
+            steps {
+                // Node на агенте не появляется (см. infra/jenkins/Dockerfile: только бинарные
+                // COPY из официальных образов), поэтому прогон в контейнере.
+                sh 'docker build -f shortener-web/Dockerfile --target unit ' +
+                   '-t shortener-web-unit:${APP_IMAGE_TAG} shortener-web'
+                sh 'docker run --rm shortener-web-unit:${APP_IMAGE_TAG}'
+            }
+            post {
+                always { sh 'docker image rm -f shortener-web-unit:${APP_IMAGE_TAG} || true' }
+            }
+        }
+
         stage('Образ приложения') {
             steps {
                 sh 'docker build -t shortener-service:${APP_IMAGE_TAG} shortener-service'
@@ -142,6 +156,45 @@ pipeline {
             steps {
                 dir('shortener-autotests') {
                     sh 'mvn -B test -DbaseUrl=${BASE_URL}'
+                }
+            }
+        }
+
+        stage('Интерфейс: e2e') {
+            steps {
+                sh '''
+                    # 429-сценарию нужен лимит 2 на пользователя. Автотесты этапа 4 отработали
+                    # под 1000, теперь пересоздаём app с оверрайдом из shell-окружения.
+                    RATE_LIMIT_CREATE_PER_MINUTE=2 docker compose -f "${COMPOSE_FILE}" \\
+                        --env-file "${ENV_FILE}" up -d app
+                    # Ждём приложение, а не nginx: /app/ отвечает из образа gateway сразу, тогда как
+                    # перезапущенный Spring ещё 10-20 с не принимает /api — первый page.goto()
+                    # поймал бы 502. Ровно этот пробер стоит в стадии «Стек: готов».
+                    for i in $(seq 1 60); do
+                        if curl -sf "${BASE_URL}/actuator/health"; then
+                            echo
+                            break
+                        fi
+                        sleep 2
+                    done
+                    curl -sf "${BASE_URL}/app/" >/dev/null            # бандл на месте: 200 из gateway
+                    docker build -f shortener-web/Dockerfile --target e2e \\
+                        -t shortener-web-e2e:${APP_IMAGE_TAG} shortener-web
+                    docker create --name web-e2e --add-host=host.docker.internal:host-gateway \\
+                        -e E2E_BASE_URL=${BASE_URL} shortener-web-e2e:${APP_IMAGE_TAG}
+                    docker start -a web-e2e; rc=$?
+                    # отчёт лежит внутри ФС контейнера: монтировать workspace демон не умеет,
+                    # поэтому вытаскиваем docker cp и только потом удаляем контейнер
+                    docker cp web-e2e:/web/playwright-report shortener-web/ || true
+                    docker rm -f web-e2e
+                    exit $rc
+                '''
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'shortener-web/playwright-report/**',
+                                     allowEmptyArchive: true
+                    sh 'docker image rm -f shortener-web-e2e:${APP_IMAGE_TAG} || true'
                 }
             }
         }
