@@ -311,9 +311,9 @@ describe('LinksPage', () => {
     expect(await screen.findByRole('button', { name: 'Назад' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Вперёд' })).toBeEnabled();
     // счётчик страниц (`{текущая} / {всего}`) помечен `aria-current="page"`; отдельного ключа
-    // «Страница {n}» в словаре нет, а `links.page.size` описывает размер, не номер
+    // «Страница {n}» в словаре нет, а размер страницы показывает селект (`links.page.sizeLabel`)
     expect(screen.getByText('1 / 3')).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByText('Страница по 20')).toBeInTheDocument();
+    expect(screen.getByLabelText('Размер страницы')).toHaveValue('20');
 
     await user.click(screen.getByRole('button', { name: 'Вперёд' }));
     await waitFor(() => expect(paths(fetchMock)).toHaveLength(2));
@@ -336,7 +336,28 @@ describe('LinksPage', () => {
     // `paramsFor` обязан дописывать НЕдефолтный размер, иначе переход на вторую страницу молча
     // вернул бы `size=20` и пользователь потерял бы свой `?size=50` из пересланной ссылки
     expect(paths(fetchMock)[1]).toBe('/api/links?page=2&size=50');
-    expect(screen.getByText('Страница по 50')).toBeInTheDocument();
+    expect(screen.getByLabelText('Размер страницы')).toHaveValue('50');
+  });
+
+  it('смена размера уходит в запрос с новым size= и page=0', async () => {
+    const user = userEvent.setup();
+    const fetched = { totalElements: 42, totalPages: 3, first: false, last: false };
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(ok(pageOf([link()], { ...fetched, number: 1 })))
+      .mockResolvedValue(ok(pageOf([link({ code: 'size50' })], { number: 0, size: 50, first: true, last: true })));
+    // вторая страница в URL: смена размера обязана сбросить номер, иначе сервер вернул бы пустой
+    // `content` и список выглядел бы потерянным
+    renderWithProviders(<LinksPage />, '/?page=1');
+    await screen.findByRole('button', { name: 'Вперёд' });
+    expect(screen.getByLabelText('Размер страницы')).toHaveValue('20');
+
+    await user.selectOptions(screen.getByLabelText('Размер страницы'), '50');
+    await waitFor(() => expect(paths(fetchMock)).toHaveLength(2));
+    expect(paths(fetchMock)[1]).toBe('/api/links?page=0&size=50');
+    expect(await screen.findByRole('link', { name: 'size50' })).toBeInTheDocument();
+    // `paramsFor(0, 50)` не пишет `page=0`: адрес остаётся коротким, а номер всё равно первая
+    expect(screen.queryByRole('button', { name: 'Вперёд' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Размер страницы')).toHaveValue('50');
   });
 
   it('параметры страницы из URL урезаются до границ сервера с обеих сторон', async () => {

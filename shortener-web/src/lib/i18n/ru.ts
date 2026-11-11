@@ -42,7 +42,7 @@ export const ru = {
   'links.delete.cancel': 'Отмена',
   'links.page.prev': 'Назад',
   'links.page.next': 'Вперёд',
-  'links.page.size': 'Страница по {size}',
+  'links.page.sizeLabel': 'Размер страницы',
   'links.never': 'никогда',
   'status.active': 'Активна',
   'status.inactive': 'Удалена',

@@ -140,6 +140,9 @@ export default function LinksPage() {
               first={state.data.first}
               last={state.data.last}
               onChange={(next) => setParams(paramsFor(next, size), { replace: true })}
+              // смена размера сбрасывает номер на первую страницу: на второй странице при большем
+              // размере сервер вернул бы пустой `content`, и список выглядел бы потерянным
+              onSizeChange={(next) => setParams(paramsFor(0, next), { replace: true })}
             />
           </>
         )}

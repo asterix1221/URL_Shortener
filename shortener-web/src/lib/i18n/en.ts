@@ -43,7 +43,7 @@ export const en = {
   'links.delete.cancel': 'Cancel',
   'links.page.prev': 'Previous',
   'links.page.next': 'Next',
-  'links.page.size': 'Page of {size}',
+  'links.page.sizeLabel': 'Page size',
   'links.never': 'never',
   'status.active': 'Active',
   'status.inactive': 'Deleted',
