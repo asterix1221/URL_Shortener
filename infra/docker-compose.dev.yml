@@ -1,0 +1,9 @@
+# Dev-оверлей: поверх запечённого бандла монтируется локальный shortener-web/dist.
+#   docker compose -f infra/docker-compose.yml -f infra/docker-compose.dev.yml \
+#     --env-file infra/.env up -d gateway
+# Перед прогоном нужен `npm run build` в shortener-web: пустой каталог поверх образа означает
+# 404 на /app/, а не «старая версия». Цикл правок: npm run build -> перезагрузка страницы.
+services:
+  gateway:
+    volumes:
+      - ../shortener-web/dist:/usr/share/nginx/html/app:ro

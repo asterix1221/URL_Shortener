@@ -2,6 +2,7 @@
 
 [![autotests](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/autotests.yml)
 [![service-tests](https://github.com/asterix1221/URL_Shortener/actions/workflows/service-tests.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/service-tests.yml)
+[![web](https://github.com/asterix1221/URL_Shortener/actions/workflows/web.yml/badge.svg)](https://github.com/asterix1221/URL_Shortener/actions/workflows/web.yml)
 ![coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/asterix1221/URL_Shortener/main/docs/coverage.json)
 
 Сервис сокращения ссылок на Spring Boot: редирект, JWT-аутентификация, статистика кликов,
@@ -23,6 +24,8 @@ flowchart LR
   G[Grafana] --> PR
   GT[Gatling] --> GW
   AT[REST Assured автотесты] --> GW
+  GW -- "/app/" --> W[Статика интерфейса в образе gateway]
+  UI[Playwright e2e] --> GW
 ```
 
 Клик проходит по двум разным путям, и это главное, что нужно понять по схеме: сам редирект только
@@ -42,6 +45,7 @@ Prometheus ходит к `app:8080` внутри сети compose.
 # 1. поднять стек: gateway nginx + Postgres + Redis + Kafka + приложение
 Copy-Item infra\.env.example infra\.env
 docker compose -f infra\docker-compose.yml --env-file infra\.env up -d --build
+# интерфейс: http://localhost:8080/app/ (тот же gateway, что и API)
 
 # 1b. мониторинг для нагрузочных прогонов — отдельный профиль (в CI не поднимается)
 docker compose -f infra\docker-compose.yml --env-file infra\.env --profile monitoring up -d
@@ -88,6 +92,7 @@ infra/                docker-compose (gateway nginx, Postgres, Redis, Kafka, Pro
 shortener-service/    Spring Boot сервис
 shortener-autotests/  REST Assured автотесты + Allure
 shortener-loadtests/  Gatling-симуляции
+shortener-web/        Vite+React+TS, Vitest, Playwright (e2e/)
 Jenkinsfile           полный CI-прогон в Jenkins (тесты → образ → стек → автотесты → Allure)
 scripts/              smoke.ps1, seed.sql, вспомогательные скрипты
 docs/                 отчёты по тестам и нагрузочным экспериментам
@@ -174,6 +179,32 @@ max_clicks`: ноль обновлённых строк означает «ис�
 - Прокинутые статусы не подменяются (`proxy_intercept_errors off`), поэтому `302`, `410 Gone`
   и `429` с `Retry-After` доходят клиенту как есть.
 
+## Интерфейс
+
+Веб-интерфейс (`shortener-web/`, Vite + React + TypeScript) отдаётся тем же gateway под `/app/`:
+бандл запечён в образ (`infra/web.Dockerfile`), отдельного контейнера у интерфейса нет, запросы
+к API идут на свой origin — CORS не нужен. Что есть: вход и регистрация на одном экране, список
+ссылок (создание, копирование короткого адреса, удаление с подтверждением, серверная пагинация
+с выбором размера страницы 10/20/50/100 — селект доступен и на одной странице, а смена размера
+сбрасывает номер на первую), карточка ссылки со статистикой (счётчик переходов, гистограмма
+по дням, источники переходов), светлая и тёмная темы, русский и английский языки. Доступность:
+цели нажатия не ниже 44px (замер фикс-раунда финального ревью — минимум ровно 44px у всех 110
+видимых целей в восьми состояниях на двух вьюпортах, 1280x900 и 390x844), переходы цвета 120ms
+отключаются по `prefers-reduced-motion`. Запуск, карта ошибок, пороги покрытия и числа
+замеров — `docs/web.md`.
+
+Чего в интерфейсе нет, и почему:
+
+- **Редактирование ссылки.** В API нет эндпоинта PATCH/PUT для ссылки (`LinkController` — только
+  создание, чтение, удаление и статистика), поэтому изменить адрес или срок жизни ссылки нельзя
+  ни через интерфейс, ни напрямую; остаётся удалить и создать заново.
+- **Refresh-токен и серверный logout.** `AuthController` даёт только register/login: токен живёт
+  3600 с в sessionStorage, «выход» очищает его только в браузере, серверного отзыва нет.
+- **Число переходов в списке.** `GET /api/links` его не отдаёт, а `/stats` на каждую строку был бы
+  N+1 за счёт пользователя; счётчик виден в карточке ссылки.
+- **Публичный редирект в UI.** Переход по короткой ссылке обслуживает сервис (`GET /{code}` → 302),
+  интерфейс в нём не участвует.
+
 ## Тесты
 
 | Что | Команда |
@@ -250,9 +281,37 @@ max_clicks`: ноль обновлённых строк означает «ис�
 
 Два контура, и оба видны из README.
 
-**GitHub Actions** (`service-tests.yml`, `autotests.yml`) — то, что проверяет сам GitHub:
+**GitHub Actions** (`service-tests.yml`, `autotests.yml`, `web.yml`) — то, что проверяет сам GitHub:
 юнит и интеграционные тесты, прогон автотестов против стека, который workflow поднимает на
 раннере, бейджи и файл покрытия. Плагины и версии в нём зафиксированы числами.
+
+`web.yml` — контур интерфейса, два job'а. `unit`: Node 26, `npm ci` → `npm run lint` →
+`npm run typecheck` → `npm run coverage` (vitest + гейт покрытия), working-directory
+`shortener-web`. `e2e` с `needs: unit` и `timeout-minutes: 30`: `cp infra/.env.example infra/.env`
+и подмена `JWT_SECRET`, `docker compose … up -d --build` (стек на 8080, `APP_PORT` из
+`.env.example`), ожидание `/actuator/health` (90 попыток по 2 с), проверка `/app/`, затем `npm ci`,
+`npx playwright install --with-deps chromium` и `npx playwright test --workers=1`. В `env` job'а
+`RATE_LIMIT_CREATE_PER_MINUTE: '2'` (нужен сценарию `ratelimit.spec.ts`, перекрывает 1000 из
+`.env`), `E2E_BASE_URL: http://localhost:8080` (дефолт конфига — 28380, локальный стенд задачи 14)
+и `APP_IMAGE_TAG: web-ci` — тег образов сборки. Отчёт `playwright-report` выгружается
+артефактом только при падении (`if: failure()`). Предупреждение
+`ExperimentalWarning: localStorage is not available …` в юнит-прогоне — средовое (мост в
+`src/test/setup.ts` под Node 26), провалом стадии не считается.
+
+Масти Node в двух job'ах разные сознательно. `unit` остаётся на 26: литералы `Intl` в
+`src/lib/format.test.ts` замерены на v26.12.0 / ICU 78.3, на другой масти они вправе разойтись.
+`e2e` переведён на 22 после первого прогона в CI: распаковщик Playwright 1.49.1 на Node 26
+зависает уже после загрузки браузера — один и тот же zip `chromium-1148` на v26.12.0 обрывает
+`chrome.dll` на 238948275 Б из 238968832 и не пишет `INSTALLATION_COMPLETE` (60 с без прогресса),
+а на v22.23.5 распаковывается за 2.8 с, полный `install` — exit 0. Ассерты e2e от масти Node
+не зависят: даты и числа считает Chromium, в `shortener-web/e2e` нет ни `Intl`, ни `toLocale*`.
+`timeout-minutes: 30` поставлен там же: без границы зависший шаг молчит до дефолтных 360 минут
+job'а, а не падает. Первый прогон на PR #4: `unit` — success, `e2e` простоял 41 минуту
+в `Install browsers` и был отменён вручную, чтобы забрать логи job'а. Прогон после правки
+(коммит `45c7d45`) зелёный целиком: `unit` success, `e2e` success на Node v22.23.4 —
+шаг `Install browsers` занял 20 с, `Running 6 tests using 1 worker`, `6 passed (7.9s)`,
+стек снят `down -v` (контейнеры, том `infra_pgdata` и сеть удалены). Стадии Jenkins
+не исполнялись: рабочий стенд остановлен.
 
 **Jenkins** (`Jenkinsfile` + `infra/jenkins/`) — self-hosted, поднимается этим же
 compose-файлом:
@@ -262,17 +321,27 @@ docker compose -f infra\docker-compose.yml --env-file infra\.env --profile ci up
 # UI: http://localhost:18088 (порт bound к 127.0.0.1), логин из infra\.env
 ```
 
-Прогон `shortener-ci`: `mvn verify` (юнит + интеграционные + JaCoCo) → `docker build` под
-тегом `shortener-service:ci-<номер>` и образ gateway с запечённым `nginx.conf` (в CI-стеке
-конфигурация не монтируется из репозитория: хостовый демон, к которому job обращается через
-сокет, не видит workspace сборки) → те же теги встают в CI-стек `shortener-ci` на портах
-28180/5442/6389/29092 (не пересекаются с рабочей копией) → ожидание `/actuator/health` →
-API-автотесты через gateway → Allure в артефакты → `down -v` в `post: always`. Секреты
-стенда генерируются `openssl rand` на время сборки и в репозиторий не попадают.
+Прогон `shortener-ci`: `mvn verify` (юнит + интеграционные + JaCoCo) → юнит-гейт интерфейса
+(`docker build --target unit` + `docker run --rm`, образ `shortener-web-unit:ci-<номер>`:
+Node на агенте нет, поэтому линт, типы, vitest и гейт покрытия едут в контейнере) →
+`docker build` под тегом `shortener-service:ci-<номер>` и образ gateway с запечённым
+`nginx.conf` (в CI-стеке конфигурация не монтируется из репозитория: хостовый демон, к которому
+job обращается через сокет, не видит workspace сборки) → те же теги встают в CI-стек
+`shortener-ci` на портах 28180/5442/6389/29092 (не пересекаются с рабочей копией) → ожидание
+`/actuator/health` → API-автотесты через gateway → e2e интерфейса против того же стека
+(`app` пересоздаётся с лимитом создания 2 в минуту, образ `shortener-web-e2e:ci-<номер>`,
+контейнер `web-e2e` с `E2E_BASE_URL`, отчёт `playwright-report` в артефакты) → Allure в
+артефакты → `down -v` в `post: always`. Секреты стенда генерируются `openssl rand` на время
+сборки и в репозиторий не попадают. Обе веб-стадии написаны, но в реальном job не исполнены:
+job берёт `Jenkinsfile` с GitHub и ветка `stage-9-web` уже запушена, однако self-hosted стенд
+остановлен, а поднимать его ради прогона без отдельного согласия нельзя. Поэтому
+`timeout(time: 60, unit: 'MINUTES')` не поднят: фактического времени новых стадий нет.
+Нумерация шагов и честная оценка лимита — в `docs/ci-jenkins.md`.
 
-Отдельно от Actions этот контур нужен потому, что у него есть docker-демон с постоянной
-сетью: «собрать образ → поднять им полный стек → дёрнуть его по HTTP» на раннере GitHub не
-воспроизводится. Установка job'а, плагинный набор с фиксированными версиями, права на сокет
+Отдельно от Actions этот контур нужен не потому, что стек не поднимается на раннере: его поднимают
+и `autotests.yml`, и `web.yml`. Разница в том, что раннер эфемерный — история сборок, артефакты
+внутри стенда и docker-демон с постоянной сетью остаются за Jenkins, как и интеграционные тесты на
+Testcontainers с Allure. Установка job'а, плагинный набор с фиксированными версиями, права на сокет
 и вывод реального прогона — `docs/ci-jenkins.md`.
 
 ## Ограничения и что улучшить
@@ -308,6 +377,9 @@ API-автотесты через gateway → Allure в артефакты → `
   [`06`](docs/experiments/06-soak.md)).
 - **Снимки дашборда не рисует Grafana** (нет `grafana-image-renderer`), вместо них кадры, собранные
   по журналам (7.2–7.6), — воспроизводимые, но не «как это видит человек в UI».
+- **Интерфейс не объект нагрузочных замеров.** Профили Gatling и `docs/baseline.md` от этапа 9
+  не изменились: нагрузка этапа 7 измеряет HTTP-тракт сервиса, а отрисовку SPA в браузере
+  никто не мерил.
 
 ## Ссылки
 

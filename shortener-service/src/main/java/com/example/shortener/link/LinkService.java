@@ -21,6 +21,7 @@ import java.util.regex.Pattern;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,9 +43,12 @@ public class LinkService {
     /**
      * Коды, которые нельзя отдавать под алиасы: они принадлежат маршрутам приложения
      * ({@code /api}, {@code /actuator}, {@code /swagger-ui}, {@code /v3}) и редирект по такому
-     * коду всё равно был бы недоступен.
+     * коду всё равно был бы недоступен. {@code app} и {@code assets} занимает gateway для
+     * статики интерфейса ({@code location /app/}), и ссылка с таким кодом перекрывалась бы
+     * отдачей бандла вместо 302.
      */
-    private static final Set<String> RESERVED_CODES = Set.of("api", "actuator", "swagger-ui", "v3");
+    private static final Set<String> RESERVED_CODES =
+            Set.of("api", "actuator", "swagger-ui", "v3", "app", "assets");
 
     private final LinkRepository links;
     private final ClickEventRepository clicks;
@@ -177,15 +181,25 @@ public class LinkService {
     }
 
     /**
-     * Ссылки одного пользователя страницей. Порядок внутри страницы не задаётся явно
-     * ({@code findByUserId} без {@code OrderBy}), поэтому он не гарантирован.
+     * Ссылки одного пользователя страницей. Порядок задаётся явно — {@code createdAt DESC,
+     * id DESC}: без сортировки Postgres не гарантирует его вовсе, и одна строка могла бы
+     * повториться на двух страницах или исчезнуть между ними, а список в интерфейсе полагается
+     * на то, что страницы стабильны и идут от свежих ссылок к старым.
+     *
+     * <p>{@code id} вторым ключом убирает остаток неопределённости при равных {@code createdAt}:
+     * {@code scripts/seed.sql} загружает 100 000 ссылок одним {@code INSERT ... SELECT} без
+     * {@code created_at}, колонка берёт {@code DEFAULT now()}, а {@code now()} в Postgres равен
+     * метке транзакции — у всего сида он одинаковый. {@code id} уникален и выдаётся из
+     * {@code link_seq} до вставки, поэтому порядок полон уже на таких данных.
      *
      * @param page номер страницы, отсчёт от нуля
      * @param size размер страницы (контроллер ограничивает сверху 100)
      */
     @Transactional(readOnly = true)
     public Page<LinkResponse> list(Long userId, int page, int size) {
-        return links.findByUserId(userId, PageRequest.of(page, size)).map(this::toResponse);
+        return links.findByUserId(userId,
+                PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt", "id")))
+                .map(this::toResponse);
     }
 
     /**

@@ -1,0 +1,339 @@
+/* базовая раскладка: всё, что знают компоненты (контейнер, шапка, кнопки, таблица, бейджи,
+   тосты, состояния). Тексты приходят из словарей, цвета — из tokens.css; литеральный цвет здесь
+   один и он обязан быть литеральным: белый текст на --accent (--on-accent в токенах нет). */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  /* системный стек вместо CDN-шрифта: бандл не должен дёргать внешний хост (прогон в Jenkins
+     идёт в контейнере без выхода в интернет, а гейвит отдаёт только /app/ и /api/) */
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
+    'Noto Sans', sans-serif;
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-text-size-adjust: 100%;
+}
+
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gap) * 2);
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: var(--gap);
+}
+
+.page > main {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--gap) * 2);
+}
+
+.app-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap);
+  padding-block: var(--gap);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  margin-inline-end: auto;
+  font-weight: 600;
+}
+
+/* цвет ссылки — текст, а не --accent: на тёмном фоне акцент даёт 3.01:1, а различимое
+   подчёркивание остаётся; на светлом --text с --bg даёт 17.76:1, в тёмной теме 15.56:1 */
+/* все пять ссылок интерфейса — органы управления (бренд, код в таблице, «назад», короткий URL,
+   действие 404), а не ссылки в прозе: цель нажатия >= 44px задаётся уровнем элемента и правки
+   компонентов не требует (спека §7:197, находка 18b). inline-flex центрирует текст по вертикали,
+   иначе min-height оставил бы подпись прижатой к верхнему краю цели */
+a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  text-underline-offset: 2px;
+}
+
+/* поля ввода до правки были браузерными: замер logs-18b/10-a11y.log дал высоту 21px при требуемых
+   44px (спека §7:197). Правило задаёт высоту и оформление из токенов; ширину полей и раскладку
+   форм (`LinkForm`, `LoginPage`) оно не меняет — литеральных цветов и радиусов здесь нет */
+input,
+select,
+textarea {
+  min-height: 44px;
+  padding: var(--gap) calc(var(--gap) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+/* контраст кнопки обеспечивает подложка: белый текст на --accent даёт 6.29:1 — выше порога 4.5:1
+   для обычного текста, и перекрашивать --accent под тёмную тему не нужно */
+.btn,
+.btn-ghost {
+  min-height: 44px;
+  padding-inline: calc(var(--gap) * 2);
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  font: inherit;
+  cursor: pointer;
+}
+
+.btn {
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.btn-ghost {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn[aria-pressed='true'],
+.btn-ghost[aria-pressed='true'] {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.btn:disabled {
+  cursor: progress;
+  opacity: 0.6;
+}
+
+/* кнопка-иконка: 44×44 — минимум цели нажатия; доступное имя задаёт aria-label в компоненте */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* переходы 120ms на смену цвета интерактивных элементов (спека §7:200). Длительность — литерал
+   из спеки, токена длительности нет. Анимирован только цвет: ни transform, ни движения, ни
+   фоновых циклов; спиннер остаётся на своей анимации. Глушится в tokens.css по
+   `prefers-reduced-motion: reduce` */
+.btn,
+.btn-ghost,
+.icon-btn {
+  transition: background-color 120ms, border-color 120ms, color 120ms;
+}
+
+a {
+  transition: color 120ms;
+}
+
+/* смена темы не должна быть скачком: фон и текст страницы перетекают за те же 120ms */
+body {
+  transition: background-color 120ms, color 120ms;
+}
+
+/* тематика кнопки нарисована CSS (половина круга залита): картинка или глиф из Юникода либо
+   грузили бы внешний ресурс, либо попадали в дерево доступных имён вместо aria-label */
+.theme-dot {
+  width: 16px;
+  height: 16px;
+  border: 2px solid currentcolor;
+  border-radius: 50%;
+  background: linear-gradient(to right, currentcolor 50%, transparent 50%);
+}
+
+[data-theme='dark'] .theme-dot {
+  transform: rotate(180deg);
+}
+
+.table-grid {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+/* подпись таблицы визуально скрыта, но остаётся в дереве доступных имён: колонки описаны
+   заголовками `th scope="col"`, а caption говорит, что это за таблица */
+.table-grid caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.table-grid th,
+.table-grid td {
+  padding: var(--gap);
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--gap) / 2);
+  padding: 2px var(--gap);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.875rem;
+}
+
+/* тон статуса — точка, а не цвет текста: метка на --surface держит 16.6:1 в светлой теме и
+   13.6:1 в тёмной, тогда как окрашивать саму метку в --ok было бы 3.3:1, а в --warn — 4.06:1 */
+.badge::before {
+  content: '';
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+}
+
+.badge--active::before {
+  background: var(--ok);
+}
+
+.badge--expired::before {
+  background: var(--warn);
+}
+
+.badge--inactive::before {
+  background: var(--muted);
+}
+
+.toasts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* один `role="status"` на контейнер, поэтому элементы списка сами ролей не имеют: строгий
+   locator e2e (`getByRole('status')`) обязан находить ровно один узел */
+.toast {
+  display: flex;
+  align-items: center;
+  gap: var(--gap);
+  padding: var(--gap) calc(var(--gap) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+}
+
+.toast::before {
+  content: '';
+  width: 0.5em;
+  height: 0.5em;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.toast--ok::before {
+  background: var(--ok);
+}
+
+.toast--error::before {
+  background: var(--danger);
+}
+
+.toast p {
+  flex: 1;
+  margin: 0;
+}
+
+.state {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+  align-items: flex-start;
+  margin: 0;
+  padding: calc(var(--gap) * 2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.state p {
+  margin: 0;
+}
+
+.state--error {
+  border-color: var(--danger);
+}
+
+/* вторичный текст на --surface (фон `.state`): --muted даёт 4.52:1 в светлой теме и 6.79:1 в
+   тёмной — выше 4.5:1, но в светлой запас ровно 0.02, поэтому осветлять --muted нельзя */
+.state--empty {
+  color: var(--muted);
+}
+
+.spinner {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  border: 2px solid currentcolor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  vertical-align: -0.125em;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (max-width: 900px) {
+  .page {
+    gap: var(--gap);
+  }
+
+  /* строка таблицы становится карточкой: сетка вместо таблицы; заголовки колонок скрыты, поэтому
+     подпись ячейки берётся из `data-label` — без неё значения в карточке неразличимы */
+  .table-grid thead {
+    display: none;
+  }
+
+  .table-grid tr {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: calc(var(--gap) / 2);
+    padding: var(--gap);
+    border-bottom: 1px solid var(--border);
+  }
+
+  .table-grid td,
+  .table-grid th {
+    display: contents;
+    border: 0;
+  }
+
+  .table-grid td::before {
+    content: attr(data-label);
+    color: var(--muted);
+  }
+}

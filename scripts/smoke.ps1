@@ -38,3 +38,44 @@ for ($i = 1; $i -le 20; $i++) {
 if ($stats.totalClicks -lt 2) { throw "Клики не дошли до статистики за 20 с: totalClicks=$($stats.totalClicks)" }
 "stats: totalClicks=$($stats.totalClicks) (появились на $i-й секунде)"
 $stats | ConvertTo-Json -Depth 5
+
+# интерфейс: отдаёт gateway, а не приложение; ловит «nginx не нашёл dist» там же, где API-часть
+# ловит поломавшийся сервис
+$app = Invoke-WebRequest "$base/app/" -SkipHttpErrorCheck
+if ($app.StatusCode -ne 200 -or "$($app.Headers['Content-Type'])" -notmatch 'text/html') {
+    throw "GET /app/ вернул $($app.StatusCode) с Content-Type '$($app.Headers['Content-Type'])', ждали 200 text/html"
+}
+if (-not $app.Headers['Content-Security-Policy']) { throw "У /app/ нет Content-Security-Policy" }
+
+$index = Invoke-WebRequest "$base/app/index.html" -SkipHttpErrorCheck
+if ($index.StatusCode -ne 200 -or "$($index.Headers['Cache-Control'])" -notmatch 'no-store') {
+    throw "GET /app/index.html вернул $($index.StatusCode) с Cache-Control '$($index.Headers['Cache-Control'])', ждали 200 no-store"
+}
+
+# путь берём из самого HTML, а не из каталога: имя файла содержит хэш сборки
+$asset = [regex]::Match($app.Content, '/app/assets/[A-Za-z0-9._-]+\.js').Value
+if (-not $asset) { throw "В /app/ не найден путь к /app/assets/*.js — бандл не на месте" }
+$js = Invoke-WebRequest "$base$asset" -SkipHttpErrorCheck
+# срок свежести и неизменяемость — две подстроки одного Cache-Control: без max-age=31536000
+# браузер пользуется эвристикой RFC 7234, и «immutable» защищает нечего (спека §3.3, находка I-1)
+$assetCache = "$($js.Headers['Cache-Control'])"
+if ($js.StatusCode -ne 200 -or $assetCache -notmatch 'max-age=31536000' -or $assetCache -notmatch 'immutable') {
+    throw "$asset вернул $($js.StatusCode) с Cache-Control '$assetCache', ждали 200 public, max-age=31536000, immutable"
+}
+
+# корень больше не принадлежит приложению
+# -MaximumRedirection 0 в PS 7 пишет ошибку «maximum redirection count has been exceeded» даже
+# с -SkipHttpErrorCheck (тот снимает только 4xx/5xx), а с ErrorActionPreference=Stop она валит
+# скрипт. -ErrorAction SilentlyContinue гасит именно эту запись и возвращает сам ответ: 302 и
+# Location проверяются ниже как раньше. Обрыв связи не прячется — на $null упадёт проверка.
+$root = Invoke-WebRequest "$base/" -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
+if ($root.StatusCode -ne 302 -or "$($root.Headers.Location)" -ne '/app/') {
+    throw "GET / вернул $($root.StatusCode) с Location '$($root.Headers.Location)', ждали 302 /app/"
+}
+
+# адрес входа без завершающего слэша: иначе он уезжает в API как зарезервированный код `app`
+$appBare = Invoke-WebRequest "$base/app" -MaximumRedirection 0 -SkipHttpErrorCheck -ErrorAction SilentlyContinue
+if ($appBare.StatusCode -ne 302 -or "$($appBare.Headers.Location)" -ne '/app/') {
+    throw "GET /app вернул $($appBare.StatusCode) с Location '$($appBare.Headers.Location)', ждали 302 /app/"
+}
+"UI: /app/ 200 text/html, index no-store, $asset max-age=31536000 immutable, / и /app -> 302 /app/"

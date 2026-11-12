@@ -1,0 +1,17 @@
+/* единственные константы оформления: компоненты не пишут цвета и радиусы literals, а берут их
+   отсюда, поэтому тёмная тема — это шесть переопределённых переменных, а не второй CSS */
+:root {
+  --bg: #ffffff; --surface: #f7f7f8; --text: #16181d; --muted: #6b7280; --border: #e5e7eb;
+  --accent: #4f46e5; --danger: #dc2626; --ok: #16a34a; --warn: #d97706;
+  --radius: 10px; --gap: 8px; --max: 1040px;
+  color-scheme: light dark;
+}
+[data-theme='dark'] {
+  --bg: #0f1115; --surface: #161a20; --text: #e7e9ee; --muted: #9aa2af; --border: #262b33;
+}
+/* `transition: none !important` глушит реальные переходы base.css: смену цвета кнопок, ссылок и
+   самой страницы за 120ms (спека §7:200), в том числе при переключении темы. `animation-duration`
+   по-прежнему нужен отдельно: `animation: spin … infinite` у `.spinner` через transition не проходит */
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; }
+}

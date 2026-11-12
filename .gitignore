@@ -17,3 +17,13 @@ shortener-loadtests/src/test/resources/stats.csv
 # рабочие документы, не публичные
 /PLAN.md
 /CLAUDE.md
+/prompt-diagrams-agent.md
+# дизайн-спеки и планы этапов — рабочий артефакт, в репозитории не публикуется
+/docs/superpowers/
+
+# фронтенд: зависимости, бандл и следы прогонов
+shortener-web/node_modules/
+shortener-web/dist/
+shortener-web/coverage/
+shortener-web/playwright-report/
+shortener-web/test-results/

@@ -1,5 +1,6 @@
 // Jenkins-пайплайн URL Shortener: сборка сервиса → тесты (unit + интеграционные на
-// Testcontainers) → образ → полноценный стек в Docker Compose → API-автотесты → Allure.
+// Testcontainers) → юнит-гейт интерфейса в контейнере → образ → полноценный стек в Docker
+// Compose → API-автотесты → e2e интерфейса против того же стека → Allure.
 //
 // ТРЕБОВАНИЕ К АГЕНТУ: job выполняется внутри контейнера Jenkins, где смонтирован сокет
 // хостового Docker-демона (сервис jenkins в infra/docker-compose.yml). Поэтому:
@@ -34,11 +35,6 @@ pipeline {
         TESTCONTAINERS_HOST_OVERRIDE = 'host.docker.internal'
 
         COMPOSE_FILE = 'infra/docker-compose.yml'
-        // Оверлей CI-стенда: gateway с запечённой конфигурацией вместо bind-монтирования.
-        // Демон резолвит относительные пути монтирований в своей файловой системе, а workspace
-        // с репозиторием есть только внутри контейнера Jenkins, поэтому базовый файл в CI
-        // непроходим (подробности — в комментарии infra/docker-compose.ci.yml).
-        COMPOSE_FILE_CI = 'infra/docker-compose.ci.yml'
         ENV_FILE = 'infra/.env'
 
         // Теги образов, которые пайплайн собирает и которые затем встают в стек: сервисы app и
@@ -81,16 +77,30 @@ pipeline {
             }
         }
 
+        stage('Интерфейс: линт, типы, Vitest и гейт покрытия') {
+            steps {
+                // Node на агенте не появляется (см. infra/jenkins/Dockerfile: только бинарные
+                // COPY из официальных образов), поэтому прогон в контейнере.
+                sh 'docker build -f shortener-web/Dockerfile --target unit ' +
+                   '-t shortener-web-unit:${APP_IMAGE_TAG} shortener-web'
+                sh 'docker run --rm shortener-web-unit:${APP_IMAGE_TAG}'
+            }
+            post {
+                always { sh 'docker image rm -f shortener-web-unit:${APP_IMAGE_TAG} || true' }
+            }
+        }
+
         stage('Образ приложения') {
             steps {
                 sh 'docker build -t shortener-service:${APP_IMAGE_TAG} shortener-service'
                 sh 'docker image inspect shortener-service:${APP_IMAGE_TAG} --format "size={{.Size}} bytes"'
 
-                // Gateway — конфиг внутри образа: его сборочный контекст клиент compose читает
-                // сам и отдаёт демону потоком, поэтому путь из workspace доезжает до сборки.
+                // Gateway — конфиг и бандл интерфейса внутри образа: его сборочный контекст
+                // (корень репозитория) клиент compose читает сам и отдаёт демону потоком,
+                // поэтому путь из workspace доезжает до сборки.
                 // Здесь ещё нет --env-file: infra/.env генерируется следующим этапом, а тег
                 // берётся из окружения job'а (${APP_IMAGE_TAG} подставляется при интерполяции).
-                sh 'docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" build gateway'
+                sh 'docker compose -f "${COMPOSE_FILE}" build gateway'
                 sh 'docker image inspect shortener-gateway:${APP_IMAGE_TAG} --format "size={{.Size}} bytes"'
             }
         }
@@ -116,9 +126,9 @@ pipeline {
 
                     # Без --build: образ уже собран предыдущим этапом под тегом ${APP_IMAGE_TAG},
                     # и стек должен поднять именно его, а не пересобранную копию.
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" \
+                    docker compose -f "${COMPOSE_FILE}" \
                         --env-file "${ENV_FILE}" up -d
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" \
+                    docker compose -f "${COMPOSE_FILE}" \
                         --env-file "${ENV_FILE}" images app gateway
                 '''
             }
@@ -135,8 +145,8 @@ pipeline {
                         sleep 2
                     done
                     echo "gateway не отдал /actuator/health за 120 с"
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" --env-file "${ENV_FILE}" ps
-                    docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" --env-file "${ENV_FILE}" logs --tail=120 app gateway
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" ps
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" logs --tail=120 app gateway
                     exit 1
                 '''
             }
@@ -146,6 +156,64 @@ pipeline {
             steps {
                 dir('shortener-autotests') {
                     sh 'mvn -B test -DbaseUrl=${BASE_URL}'
+                }
+            }
+        }
+
+        stage('Интерфейс: e2e') {
+            steps {
+                sh '''
+                    # Отчёт прошлого прогона не должен попасть в артефакты этого: workspace между
+                    # сборками не чистится, а каталог gitignored (.gitignore:28).
+                    rm -rf shortener-web/playwright-report
+                    # Имя контейнера глобальное на хосте, не в пространстве имён compose-проекта:
+                    # прерванный предыдущий job оставляет «протёкший» web-e2e, а `docker cp` в
+                    # post { always } выполняется на любом пути — без предочистки здесь в артефакты
+                    # попал бы чужой старый отчёт, если первый шаг упал до создания контейнера.
+                    docker rm -f web-e2e || true
+                    # 429-сценарию нужен лимит 2 на пользователя. Автотесты этапа 4 отработали
+                    # под 1000, теперь пересоздаём app с оверрайдом из shell-окружения.
+                    RATE_LIMIT_CREATE_PER_MINUTE=2 docker compose -f "${COMPOSE_FILE}" \\
+                        --env-file "${ENV_FILE}" up -d app
+                    # Ждём приложение, а не nginx: /app/ отвечает из образа gateway сразу, тогда как
+                    # перезапущенный Spring ещё 10-20 с не принимает /api — первый page.goto()
+                    # поймал бы 502. Тот же пробник с той же диагностикой, что в стадии «Стек: готов».
+                    for i in $(seq 1 60); do
+                        if curl -sf "${BASE_URL}/actuator/health"; then
+                            echo
+                            exit 0
+                        fi
+                        sleep 2
+                    done
+                    echo "app не отдал /actuator/health за 120 с после пересоздания"
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" ps
+                    docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" logs --tail=120 app gateway
+                    exit 1
+                '''
+                sh '''
+                    curl -sf "${BASE_URL}/app/" >/dev/null            # бандл на месте: 200 из gateway
+                    docker build -f shortener-web/Dockerfile --target e2e \\
+                        -t shortener-web-e2e:${APP_IMAGE_TAG} shortener-web
+                    # Имя контейнера уже очищено первым шагом: между шагами его никто не создаёт.
+                    docker create --name web-e2e --add-host=host.docker.internal:host-gateway \\
+                        -e E2E_BASE_URL=${BASE_URL} shortener-web-e2e:${APP_IMAGE_TAG}
+                    # sh в Jenkins идёт с -e: голый `docker start -a …; rc=$?` оборвал бы скрипт
+                    # до вытаскивания отчёта. В AND-OR списке -e не срабатывает, код сохраняется.
+                    rc=0
+                    docker start -a web-e2e || rc=$?
+                    exit $rc
+                '''
+            }
+            post {
+                always {
+                    // отчёт лежит внутри ФС контейнера: монтировать workspace демон не умеет,
+                    // поэтому вытаскиваем docker cp и только потом удаляем контейнер
+                    sh 'docker cp web-e2e:/web/playwright-report shortener-web/ || true'
+                    sh 'docker rm -f web-e2e || true'
+                    archiveArtifacts artifacts: 'shortener-web/playwright-report/**',
+                                     allowEmptyArchive: true
+                    // после удаления контейнера, иначе image rm только снимет тег
+                    sh 'docker image rm -f shortener-web-e2e:${APP_IMAGE_TAG} || true'
                 }
             }
         }
@@ -161,7 +229,7 @@ pipeline {
                              allowEmptyArchive: true
             // -v удаляет и том с данными, чтобы следующий прогон начинался с чистой базы
             // и применённых заново миграций.
-            sh 'docker compose -f "${COMPOSE_FILE}" -f "${COMPOSE_FILE_CI}" --env-file "${ENV_FILE}" down -v || true'
+            sh 'docker compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" down -v || true'
             // Образы сборки удаляются по именам, а не `down --rmi local`: у --rmi local нет
             // фильтра по тегу и он заодно снёс бы shortener-jenkins:local, то есть пересборку
             // 71 запиненного плагина на следующем прогоне.
