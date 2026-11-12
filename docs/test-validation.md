@@ -2,10 +2,11 @@
 
 Проверка «ловят ли тесты поломку»: вносим в `shortener-service` осознанную ошибку, запускаем
 `.\mvnw.cmd clean verify` (в Git Bash — `./mvnw clean verify`), смотрим, какие тесты упали,
-и откатываем правку `git checkout -- <файл>`. Каждая мутация — отдельный прогон, правки
-не коммитились. Нумерация — как в плане.
+и восстанавливаем только временно изменённый фрагмент. Каждая мутация — отдельный прогон,
+правки не коммитились. Нумерация — как в плане. Мутация №1 дополнительно проверена
+2026-11-12 в отдельном worktree на `6aefea1`; исходники основного checkout не менялись.
 
-## Базовый зелёный прогон перед мутациями
+## Исторический базовый прогон этапа 3 (перед мутациями №2 и №3)
 
 ```
 Tests run: 59, Failures: 0, Errors: 0     (юнит-тесты, surefire)
@@ -26,25 +27,40 @@ BUILD SUCCESS
 
 ## Мутация 1 — убрать проверку владельца в `LinkService.requireOwned`
 
-**Не выполнена.** Правка (временное удаление `if (!link.getUserId().equals(userId)) throw new
-ForbiddenException(...)`) блокируется слоем разрешений агента как ослабление контроля доступа;
-согласие через выбор с вариантами классификатор не принял как разрешение на этот конкретный код.
-Обход блокировки другими инструментами не выполнялся, код сервиса не менялся.
+**Выполнена 2026-11-12.** Прежняя попытка была заблокирована разрешениями; после отдельного
+адресного согласия проверка проведена в изолированном worktree на `6aefea1`. Перед изменением
+полный `clean verify` прошёл: **104 юнит-теста + 19 IT**, без падений, гейт JaCoCo выполнен.
 
-Тесты, которые должны её поймать, написаны и зелёные на корректном коде:
+Временно удалён только блок `if (!link.getUserId().equals(userId))`, выбрасывающий
+`ForbiddenException` в `LinkService.requireOwned`. Тесты и настройки покрытия не менялись.
+Два уровня запускались отдельно: иначе падение Surefire остановило бы Maven до Failsafe.
 
-- `LinkServiceTest.forbidsAccessToForeignLink` — `getOwned`/`stats`/`delete` чужой ссылки → `ForbiddenException`;
-- `SecurityIT.foreignLinkIsHiddenFromOtherUsers` — 403 на просмотр, статистику и удаление чужой ссылки
-  при сохраняющемся публичном редиректе 302.
+```text
+bash mvnw -B test -Dtest=LinkServiceTest#forbidsAccessToForeignLink
+Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+LinkServiceTest.forbidsAccessToForeignLink:254
+Expecting code to raise a throwable.
+BUILD FAILURE (exit 1)
 
-Как проверить вручную (правка строк 123-125 и откат):
-
-```powershell
-cd shortener-service
-# удали в src/main/java/com/example/shortener/link/LinkService.java проверку владельца в requireOwned
-.\mvnw.cmd clean verify      # ожидаем падение LinkServiceTest и SecurityIT
-git checkout -- src/main/java/com/example/shortener/link/LinkService.java
+bash mvnw -B test-compile failsafe:integration-test failsafe:verify -Dit.test=SecurityIT#foreignLinkIsHiddenFromOtherUsers
+Tests run: 1, Failures: 1, Errors: 0, Skipped: 0
+SecurityIT.foreignLinkIsHiddenFromOtherUsers:60
+expected: 403
+ but was: 200
+BUILD FAILURE (exit 1)
 ```
+
+Оба падения — нарушения утверждений о доступе к чужой ссылке, не ошибки запуска или компиляции.
+Каждый тест остановился на первом утверждении просмотра: утверждения статистики и удаления
+после него в красном прогоне не исполнялись. IT использовал отдельные PostgreSQL, Redis и Kafka
+в Testcontainers; основная база не участвовала.
+
+После точного восстановления блока `git diff --exit-code -- <LinkService.java>` вернул 0;
+полный `bash mvnw -B clean verify` снова завершился `BUILD SUCCESS`: **104 юнит-теста + 19 IT**,
+0 failures/errors/skipped, **JaCoCo 387/387 строк (100%)**, гейт 1.00 не менялся.
+Мутация не коммитилась. На Windows во всех этих запусках использовался абсолютный путь
+`C:/Program Files/Git/bin/bash.exe`: вызов `bash` по короткому имени из Python до проверки
+давал ошибку `JAVA_HOME`, не запуская тестов; этот сбой не засчитывается как обнаружение мутации.
 
 ## Мутация 2 — атомарный `UPDATE` заменён на «прочитал, проверил, записал»
 
@@ -89,5 +105,6 @@ read-check-write ведёт себя корректно, ловить её до�
 
 ## Итог
 
-Из трёх запланированных мутаций две подтверждены падением тестов (№2 и №3), одна (№1)
-не выполнена из-за блокировки на уровне разрешений окружения — не из-за отсутствия тестов.
+Все **три запланированные мутации** подтверждены падением тестов: №2 и №3 — в исходной серии
+этапа 3, №1 — дополнительно 2026-11-12. После последней мутации исходный код восстановлен,
+полный прогон зелёный; временные дефекты в историю репозитория не попадали.
