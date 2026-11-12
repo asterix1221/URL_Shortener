@@ -7,6 +7,8 @@ infra/.env
 *.jfr
 .allure/
 /*.log
+# архивы логов CI — тяжёлые, в репозиторий не публикуются
+/logs_*.zip
 shortener-loadtests/target/
 shortener-loadtests/src/test/resources/codes.csv
 # производный от codes.csv subset для прогретого кэша (см. docs/experiments/01-redis-vs-no-cache.md)
@@ -20,6 +22,8 @@ shortener-loadtests/src/test/resources/stats.csv
 /prompt-diagrams-agent.md
 # дизайн-спеки и планы этапов — рабочий артефакт, в репозитории не публикуется
 /docs/superpowers/
+/.superpowers/
+/.worktrees/
 
 # фронтенд: зависимости, бандл и следы прогонов
 shortener-web/node_modules/

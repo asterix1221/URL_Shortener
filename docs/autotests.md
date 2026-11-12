@@ -307,5 +307,11 @@ using 1 worker`, код выхода 0 (`logs-fix/05-e2e.log`). Прежний �
 **6 passed (13.2 с)**, повтор подряд без сброса тома — **6 passed (7.6 с)**
 (`task-15-fix-1-report.md`) — эти числа остаются со своим источником. В GitHub Actions тот же
 набор зелёный: прогон `web` на PR #4, коммит `45c7d45`, job `e2e` на Node 22 — `Running 6 tests
-using 1 worker`, **6 passed (7.9 с)**, код выхода 0, стек снят `down -v`. Веб-стадии Jenkins
-не исполнены: рабочий стенд остановлен (см. «CI/CD» в README).
+using 1 worker`, **6 passed (7.9 с)**, код выхода 0, стек снят `down -v`.
+В Jenkins тот же набор исполнен 2026-11-12: `shortener-ci` №6, ветка `stage-9-web`, коммит
+`6aefea1` — `Running 6 tests using 1 worker`, **6 passed (9.9s)**, код выхода 0. Архивированный
+`shortener-web/playwright-report/index.html` содержит 6 успешных тестов без ошибок, пропусков
+и нестабильных результатов; обе веб-стадии и сборка целиком — `SUCCESS`. После `down -v`
+независимо проверено отсутствие ресурсов `shortener-ci`, контейнера `web-e2e` и четырёх тегов
+образов `ci-6`; основная база `infra_pgdata` сохранена. Длительности стадий и отчёты —
+в `docs/ci-jenkins.md`.
